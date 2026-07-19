@@ -52,6 +52,33 @@ npm install
 npm run dev             # http://localhost:5173
 ```
 
+## Deployment (Render, single service)
+
+Express serves the built frontend directly (see `backend/src/index.ts`),
+so the whole app deploys as **one** Render Web Service instead of separate
+frontend/backend deployments:
+
+- **Build command**: `npm run build` (installs + builds frontend, then
+  installs + builds backend)
+- **Start command**: `npm start` (runs the compiled backend, which also
+  serves `frontend/dist` and falls back to `index.html` for client-side
+  routes)
+- **Root directory**: repo root
+
+A `render.yaml` is included for Render's Blueprint deploy — it lists every
+env var the backend needs (`DATABASE_URL`, `JWT_SECRET`, `MOOLRE_*`,
+`NOWPAYMENTS_*`, etc.) as `sync: false`, meaning Render will prompt you to
+fill in the actual values rather than pulling them from this repo (none of
+that is committed).
+
+After deploying, update:
+- `NOWPAYMENTS_IPN_CALLBACK_URL` to `https://<your-render-url>/api/payments/crypto/ipn`
+- `FRONTEND_URL` to your Render URL (used for CORS)
+
+Local dev is unaffected — `frontend` and `backend` still run as two
+separate dev servers (`npm run dev` in each), talking to each other via
+`VITE_API_URL` in `frontend/.env.local`.
+
 ## Notes
 
 - `backend/.env` and `frontend/.env.local` are gitignored — never commit

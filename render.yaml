@@ -1,0 +1,38 @@
+services:
+  - type: web
+    name: afrihome
+    env: node
+    plan: free
+    buildCommand: npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: FRONTEND_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_EXPIRY
+        value: 1h
+      - key: REFRESH_TOKEN_EXPIRY
+        value: 7d
+      - key: CRON_SECRET
+        sync: false
+      - key: MOOLRE_API_USER
+        sync: false
+      - key: MOOLRE_API_KEY
+        sync: false
+      - key: MOOLRE_ACCOUNT_NUMBER
+        sync: false
+      - key: NOWPAYMENTS_API_KEY
+        sync: false
+      - key: NOWPAYMENTS_IPN_SECRET
+        sync: false
+      - key: NOWPAYMENTS_IPN_CALLBACK_URL
+        sync: false
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: PAYSTACK_PUBLIC_KEY
+        sync: false

@@ -1,8 +1,11 @@
 import axios from "axios";
 import { useAuthStore } from "./store";
 
+// Falls back to "" (same-origin, relative requests) for the single-service
+// deployment where Express serves the built frontend directly. Local dev
+// overrides this via VITE_API_URL in frontend/.env.local.
 export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL ?? "http://localhost:3001",
+  baseURL: import.meta.env.VITE_API_URL ?? "",
 });
 
 api.interceptors.request.use((config) => {

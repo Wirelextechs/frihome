@@ -1,6 +1,9 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
+import path from "node:path";
+import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 import { authRouter } from "./routes/auth.js";
 import { kycRouter } from "./routes/kyc.js";
 import { projectsRouter } from "./routes/projects.js";
@@ -34,6 +37,22 @@ app.use("/api/payments", paymentsRouter);
 app.use("/api/users", usersRouter);
 app.use("/api/wallet", walletRouter);
 app.use("/api/admin", adminRouter);
+
+// When deployed as a single service, the frontend is built to
+// frontend/dist and served directly by this server — so Render (or any
+// host) only needs one Web Service instead of separate front/backend
+// deployments. In local dev, frontend/dist won't exist (the frontend
+// runs on its own Vite dev server instead), so this is skipped.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const frontendDistPath = path.resolve(__dirname, "../../frontend/dist");
+
+if (fs.existsSync(frontendDistPath)) {
+  app.use(express.static(frontendDistPath));
+  app.get("*", (req, res, next) => {
+    if (req.path.startsWith("/api/")) return next();
+    res.sendFile(path.join(frontendDistPath, "index.html"));
+  });
+}
 
 app.listen(port, () => {
   console.log(`AfriHome API listening on http://localhost:${port}`);
