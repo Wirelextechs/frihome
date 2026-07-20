@@ -11,6 +11,13 @@ import { PortfolioPage } from "./pages/PortfolioPage";
 import { InvestmentDetailPage } from "./pages/InvestmentDetailPage";
 import { WalletPage } from "./pages/WalletPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
+import { AdminPage } from "./pages/AdminPage";
+import { AdminUsersPage } from "./pages/AdminUsersPage";
+import { AdminKycPage } from "./pages/AdminKycPage";
+import { AdminProjectsPage } from "./pages/AdminProjectsPage";
+import { AdminFinancialsPage } from "./pages/AdminFinancialsPage";
+import { AdminPaymentsPage } from "./pages/AdminPaymentsPage";
+import { AdminWithdrawalsPage } from "./pages/AdminWithdrawalsPage";
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   const user = useAuthStore((s) => s.user);
@@ -74,8 +81,67 @@ export default function App() {
           }
         />
         <Route path="/profile" element={<Navigate to="/dashboard" replace />} />
-        <Route path="*" element={<NotFoundPage />} />
       </Route>
+
+      {/* Admin Routes */}
+      <Route
+        path="/admin"
+        element={
+          <RequireAuth>
+            <AdminPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/users"
+        element={
+          <RequireAuth>
+            <AdminUsersPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/kyc"
+        element={
+          <RequireAuth>
+            <AdminKycPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/projects"
+        element={
+          <RequireAuth>
+            <AdminProjectsPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/financials"
+        element={
+          <RequireAuth>
+            <AdminFinancialsPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/payments"
+        element={
+          <RequireAuth>
+            <AdminPaymentsPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/withdrawals"
+        element={
+          <RequireAuth>
+            <AdminWithdrawalsPage />
+          </RequireAuth>
+        }
+      />
+
+      <Route path="*" element={<NotFoundPage />} />
     </Routes>
   );
 }

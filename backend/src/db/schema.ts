@@ -239,6 +239,33 @@ export const auditLogs = pgTable("audit_logs", {
     onDelete: "set null",
   }),
   action: varchar("action", { length: 100 }).notNull(),
+  resource: varchar("resource", { length: 50 }),
+  resourceId: varchar("resource_id", { length: 255 }),
   metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const adminPermissions = pgTable("admin_permissions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  adminId: uuid("admin_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  permission: varchar("permission", { length: 100 }).notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const confirmationTokens = pgTable("confirmation_tokens", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  adminId: uuid("admin_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  action: varchar("action", { length: 100 }).notNull(),
+  actionData: jsonb("action_data"),
+  token: varchar("token", { length: 255 }).notNull().unique(),
+  expiresAt: timestamp("expires_at").notNull(),
+  confirmedBy: uuid("confirmed_by").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  confirmedAt: timestamp("confirmed_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
