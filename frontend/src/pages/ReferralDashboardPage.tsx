@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Copy, Gift, Share2, Users } from "lucide-react";
+import { Copy, Gift, ShieldAlert, Share2, Users } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
 import { useAuthStore } from "../lib/store";
@@ -15,6 +15,12 @@ interface Stats {
   level2EarningsGhs: string;
   level3EarningsGhs: string;
   totalEarningsGhs: string;
+}
+
+interface ConfigRow {
+  level: number;
+  rewardPercentage: string;
+  isActive: boolean;
 }
 
 interface Referee {
@@ -38,6 +44,7 @@ interface Reward {
 export function ReferralDashboardPage() {
   const currency = useAuthStore((s) => s.user?.preferredCurrency) ?? "GHS";
   const [code, setCode] = useState<string | null>(null);
+  const [config, setConfig] = useState<ConfigRow[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [referees, setReferees] = useState<Referee[]>([]);
   const [rewards, setRewards] = useState<Reward[]>([]);
@@ -46,12 +53,14 @@ export function ReferralDashboardPage() {
   useEffect(() => {
     Promise.all([
       api.get("/api/referrals/code"),
+      api.get("/api/referrals/config"),
       api.get("/api/referrals/stats"),
       api.get("/api/referrals/referees?level=1"),
       api.get("/api/referrals/rewards"),
     ])
-      .then(([codeRes, statsRes, refereesRes, rewardsRes]) => {
+      .then(([codeRes, configRes, statsRes, refereesRes, rewardsRes]) => {
         setCode(codeRes.data.code);
+        setConfig(configRes.data.data);
         setStats(statsRes.data);
         setReferees(refereesRes.data.data);
         setRewards(rewardsRes.data.data);
@@ -59,6 +68,9 @@ export function ReferralDashboardPage() {
       .catch(() => toast.error("Failed to load referral data"))
       .finally(() => setLoading(false));
   }, []);
+
+  const pctForLevel = (level: number) =>
+    config.find((c) => c.level === level && c.isActive)?.rewardPercentage ?? "0";
 
   const shareLink = code ? `${window.location.origin}/signup?ref=${code}` : "";
 
@@ -118,6 +130,66 @@ export function ReferralDashboardPage() {
           </button>
         </div>
       </div>
+
+      <Card className="p-4">
+        <p className="text-sm font-bold text-ink-900">How rewards work</p>
+        <p className="mt-1 text-xs text-ink-500">
+          When someone in your referral chain invests, you earn a percentage
+          of their investment — credited to your wallet instantly. Deposits
+          and withdrawals never trigger a reward, only real investments.
+        </p>
+        <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+          {[1, 2, 3].map((level) => (
+            <div key={level} className="rounded-xl bg-ink-50 p-2.5">
+              <p className="text-[10px] font-semibold uppercase text-ink-400">
+                Level {level}
+              </p>
+              <p className="mt-1 text-lg font-extrabold text-primary">
+                {pctForLevel(level)}%
+              </p>
+              <p className="text-[10px] text-ink-400">
+                {level === 1
+                  ? "people you refer"
+                  : level === 2
+                    ? "their referrals"
+                    : "their referrals' referrals"}
+              </p>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      <Card className="border-amber-200 bg-amber-50 p-4">
+        <div className="flex items-center gap-1.5">
+          <ShieldAlert size={15} className="text-amber-700" />
+          <p className="text-sm font-bold text-amber-900">
+            Rules & prohibited activity
+          </p>
+        </div>
+        <ul className="mt-2 space-y-1.5 text-xs text-amber-800">
+          <li>
+            • Referring yourself — using your own code, or signing up
+            duplicate/fake accounts to farm rewards — is prohibited.
+          </li>
+          <li>
+            • Referred accounts must belong to real, independent
+            individuals who pass KYC. Bots, stolen identities, and
+            circumvented verification are not allowed.
+          </li>
+          <li>
+            • Coordinating with others to create artificial investment
+            activity purely to trigger rewards (wash investing) is
+            prohibited.
+          </li>
+        </ul>
+        <p className="mt-2 text-xs font-semibold text-amber-900">
+          Consequences: rewards obtained through violations will be
+          reversed, pending rewards forfeited, and the account(s) involved
+          may be suspended or permanently banned. Serious or repeated abuse
+          may result in forfeiture of wallet balance tied to the fraudulent
+          activity.
+        </p>
+      </Card>
 
       <Card className="p-4">
         <p className="text-xs font-medium uppercase tracking-wide text-ink-400">

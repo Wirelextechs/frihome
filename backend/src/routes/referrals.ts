@@ -4,6 +4,7 @@ import { db } from "../db/index.js";
 import {
   referralRelationships,
   referralRewards,
+  referralConfig,
   users,
   portfolios,
 } from "../db/schema.js";
@@ -21,6 +22,24 @@ referralsRouter.get("/code", async (req: AuthedRequest, res) => {
   } catch (error) {
     console.error("Error generating referral code:", error);
     res.status(500).json({ error: "Failed to generate referral code" });
+  }
+});
+
+referralsRouter.get("/config", async (_req: AuthedRequest, res) => {
+  try {
+    const rows = await db
+      .select({
+        level: referralConfig.level,
+        rewardPercentage: referralConfig.rewardPercentage,
+        isActive: referralConfig.isActive,
+      })
+      .from(referralConfig)
+      .orderBy(referralConfig.level);
+
+    res.json({ data: rows });
+  } catch (error) {
+    console.error("Error fetching referral config:", error);
+    res.status(500).json({ error: "Failed to fetch referral config" });
   }
 });
 
