@@ -22,6 +22,8 @@ import { AdminPaymentsPage } from "./pages/AdminPaymentsPage";
 import { AdminPaymentDetailPage } from "./pages/AdminPaymentDetailPage";
 import { AdminWithdrawalsPage } from "./pages/AdminWithdrawalsPage";
 import { AdminWithdrawalDetailPage } from "./pages/AdminWithdrawalDetailPage";
+import { AdminRoiPage } from "./pages/AdminRoiPage";
+import { AdminRoiDetailPage } from "./pages/AdminRoiDetailPage";
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   const user = useAuthStore((s) => s.user);
@@ -173,6 +175,22 @@ export default function App() {
         element={
           <RequireAuth>
             <AdminWithdrawalDetailPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/roi"
+        element={
+          <RequireAuth>
+            <AdminRoiPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/roi/:investmentId"
+        element={
+          <RequireAuth>
+            <AdminRoiDetailPage />
           </RequireAuth>
         }
       />

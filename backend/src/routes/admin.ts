@@ -14,6 +14,8 @@ import {
   auditLogs,
   adminPermissions,
   withdrawalMethods,
+  payouts,
+  portfolios,
 } from "../db/schema.js";
 import {
   requireAuth,
@@ -914,3 +916,265 @@ adminRouter.get("/audit-logs", async (req: AuthedRequest, res) => {
     res.status(500).json({ error: "Failed to fetch audit logs" });
   }
 });
+
+// ============ ROI RECONCILIATION ============
+
+function computeDailyAmount(
+  amountGhs: string,
+  expectedReturnPct: string,
+  durationMonths: string,
+): number {
+  const durationDays = Number(durationMonths) * 30;
+  if (durationDays <= 0) return 0;
+  const totalReturn = Number(amountGhs) * (Number(expectedReturnPct) / 100);
+  return Math.round((totalReturn / durationDays) * 100) / 100;
+}
+
+function daysElapsedSince(createdAt: Date, capDays: number): number {
+  const start = new Date(createdAt);
+  start.setHours(0, 0, 0, 0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const days = Math.floor((today.getTime() - start.getTime()) / 86400000) + 1;
+  return Math.max(0, Math.min(days, capDays));
+}
+
+adminRouter.get("/roi/investments", async (req: AuthedRequest, res) => {
+  try {
+    const search = (req.query.search as string) || "";
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const limit = 20;
+    const offset = (page - 1) * limit;
+
+    const rows = await db
+      .select({
+        id: investments.id,
+        userId: investments.userId,
+        amountGhs: investments.amountGhs,
+        status: investments.status,
+        createdAt: investments.createdAt,
+        projectId: projects.id,
+        projectTitle: projects.title,
+        expectedReturnPct: projects.expectedReturnPct,
+        durationMonths: projects.durationMonths,
+        userFullName: users.fullName,
+        userEmail: users.email,
+      })
+      .from(investments)
+      .innerJoin(projects, eq(projects.id, investments.projectId))
+      .innerJoin(users, eq(users.id, investments.userId))
+      .where(eq(investments.status, "active"))
+      .orderBy(desc(investments.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    const filtered = search
+      ? rows.filter(
+          (r) =>
+            r.userEmail.toLowerCase().includes(search.toLowerCase()) ||
+            r.userFullName.toLowerCase().includes(search.toLowerCase()) ||
+            r.projectTitle.toLowerCase().includes(search.toLowerCase()),
+        )
+      : rows;
+
+    const data = await Promise.all(
+      filtered.map(async (inv) => {
+        const durationDays = Number(inv.durationMonths) * 30;
+        const dailyAmount = computeDailyAmount(
+          inv.amountGhs,
+          inv.expectedReturnPct,
+          inv.durationMonths,
+        );
+        const daysElapsed = daysElapsedSince(inv.createdAt, durationDays);
+        const expectedPaid = Math.round(dailyAmount * daysElapsed * 100) / 100;
+
+        const paidResult = await db
+          .select({ total: sql<string>`COALESCE(SUM(amount_ghs), 0)` })
+          .from(payouts)
+          .where(and(eq(payouts.investmentId, inv.id), eq(payouts.status, "paid")));
+        const paidSoFar = Number(paidResult[0]?.total || 0);
+
+        const discrepancy = Math.round((expectedPaid - paidSoFar) * 100) / 100;
+
+        return {
+          ...inv,
+          dailyAmount,
+          expectedPaid,
+          paidSoFar,
+          discrepancy,
+        };
+      }),
+    );
+
+    const countResult = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(investments)
+      .where(eq(investments.status, "active"));
+    const total = search ? filtered.length : countResult[0]?.count || 0;
+
+    res.json({ data, total, page, limit });
+  } catch (error) {
+    console.error("Error fetching ROI reconciliation:", error);
+    res.status(500).json({ error: "Failed to fetch ROI reconciliation" });
+  }
+});
+
+adminRouter.get("/roi/investments/:investmentId", async (req: AuthedRequest, res) => {
+  try {
+    const { investmentId } = req.params;
+
+    const [inv] = await db
+      .select({
+        id: investments.id,
+        userId: investments.userId,
+        amountGhs: investments.amountGhs,
+        status: investments.status,
+        createdAt: investments.createdAt,
+        projectId: projects.id,
+        projectTitle: projects.title,
+        expectedReturnPct: projects.expectedReturnPct,
+        durationMonths: projects.durationMonths,
+      })
+      .from(investments)
+      .innerJoin(projects, eq(projects.id, investments.projectId))
+      .where(eq(investments.id, investmentId));
+
+    if (!inv) {
+      return res.status(404).json({ error: "Investment not found" });
+    }
+
+    const [user] = await db
+      .select(SAFE_USER_COLUMNS)
+      .from(users)
+      .where(eq(users.id, inv.userId));
+
+    const payoutHistory = await db
+      .select()
+      .from(payouts)
+      .where(eq(payouts.investmentId, investmentId))
+      .orderBy(desc(payouts.createdAt));
+
+    const durationDays = Number(inv.durationMonths) * 30;
+    const dailyAmount = computeDailyAmount(
+      inv.amountGhs,
+      inv.expectedReturnPct,
+      inv.durationMonths,
+    );
+    const daysElapsed = daysElapsedSince(inv.createdAt, durationDays);
+    const expectedPaid = Math.round(dailyAmount * daysElapsed * 100) / 100;
+    const paidSoFar = payoutHistory
+      .filter((p) => p.status === "paid")
+      .reduce((sum, p) => sum + Number(p.amountGhs), 0);
+    const discrepancy = Math.round((expectedPaid - paidSoFar) * 100) / 100;
+
+    res.json({
+      data: {
+        ...inv,
+        user,
+        dailyAmount,
+        expectedPaid,
+        paidSoFar: Math.round(paidSoFar * 100) / 100,
+        discrepancy,
+        payoutHistory,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching investment ROI detail:", error);
+    res.status(500).json({ error: "Failed to fetch investment ROI detail" });
+  }
+});
+
+const roiAdjustSchema = z.object({
+  amountGhs: z.coerce.number().refine((n) => n !== 0, "Amount cannot be zero"),
+  reason: z.string().min(3, "A reason is required"),
+});
+
+adminRouter.post(
+  "/roi/investments/:investmentId/adjust",
+  requirePermission("roi.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const { investmentId } = req.params;
+      const parsed = roiAdjustSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.flatten() });
+      }
+      const { amountGhs, reason } = parsed.data;
+
+      const [inv] = await db
+        .select()
+        .from(investments)
+        .where(eq(investments.id, investmentId));
+
+      if (!inv) {
+        return res.status(404).json({ error: "Investment not found" });
+      }
+
+      const [wallet] = await db
+        .insert(wallets)
+        .values({ userId: inv.userId })
+        .onConflictDoNothing()
+        .returning();
+      const [currentWallet] =
+        wallet !== undefined
+          ? [wallet]
+          : await db.select().from(wallets).where(eq(wallets.userId, inv.userId)).limit(1);
+
+      const balanceBefore = Number(currentWallet.balanceGhs);
+      const balanceAfter = balanceBefore + amountGhs;
+
+      if (balanceAfter < 0) {
+        return res.status(400).json({
+          error: `This debit would take the wallet balance negative (current balance: ${balanceBefore.toFixed(2)} GHS)`,
+        });
+      }
+
+      await db.insert(payouts).values({
+        investmentId,
+        amountGhs: amountGhs.toFixed(2),
+        status: "paid",
+        scheduledFor: new Date(),
+        paidAt: new Date(),
+        isManual: true,
+        note: reason,
+        adjustedBy: req.user!.userId,
+      });
+
+      await db
+        .update(wallets)
+        .set({ balanceGhs: balanceAfter.toFixed(2), updatedAt: new Date() })
+        .where(eq(wallets.userId, inv.userId));
+
+      await db.insert(walletTransactions).values({
+        userId: inv.userId,
+        type: "payout",
+        amountGhs: amountGhs.toFixed(2),
+        balanceBeforeGhs: balanceBefore.toFixed(2),
+        balanceAfterGhs: balanceAfter.toFixed(2),
+        status: "completed",
+        description: `Manual ROI adjustment: ${reason}`,
+      });
+
+      await db
+        .update(portfolios)
+        .set({
+          totalReturnsGhs: sql`${portfolios.totalReturnsGhs} + ${amountGhs.toFixed(2)}`,
+          updatedAt: new Date(),
+        })
+        .where(eq(portfolios.userId, inv.userId));
+
+      await logAdminAction(
+        req.user!.userId,
+        "MANUAL_ROI_ADJUSTMENT",
+        "investments",
+        investmentId,
+        { amountGhs, reason },
+      );
+
+      res.json({ success: true, balanceAfter });
+    } catch (error) {
+      console.error("Error applying manual ROI adjustment:", error);
+      res.status(500).json({ error: "Failed to apply manual ROI adjustment" });
+    }
+  },
+);

@@ -9,6 +9,7 @@ import {
   DollarSign,
   CreditCard,
   LogOut,
+  Scale,
 } from "lucide-react";
 
 interface DashboardData {
@@ -92,6 +93,7 @@ export function AdminPage() {
     { label: "Financials", icon: DollarSign, to: "/admin/financials" },
     { label: "Payments", icon: CreditCard, to: "/admin/payments" },
     { label: "Withdrawals", icon: CreditCard, to: "/admin/withdrawals" },
+    { label: "ROI Reconciliation", icon: Scale, to: "/admin/roi" },
   ];
 
   return (

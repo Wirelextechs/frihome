@@ -149,6 +149,11 @@ export const payouts = pgTable("payouts", {
   status: payoutStatusEnum("status").notNull().default("scheduled"),
   scheduledFor: timestamp("scheduled_for").notNull(),
   paidAt: timestamp("paid_at"),
+  isManual: boolean("is_manual").notNull().default(false),
+  note: text("note"),
+  adjustedBy: uuid("adjusted_by").references(() => users.id, {
+    onDelete: "set null",
+  }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
