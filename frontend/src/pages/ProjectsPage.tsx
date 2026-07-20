@@ -113,7 +113,7 @@ export function ProjectsPage() {
                   {STATUS_LABEL[p.fundingStatus]}
                 </span>
                 <p className="mt-2 text-xs font-medium text-ink-600">
-                  Min ₵{Number(p.minInvestmentGhs).toLocaleString()} · From ₵
+                  Min ₵{Number(p.minInvestmentGhs).toLocaleString()} · Profit ₵
                   {minDailyRoi(p).toLocaleString()}/day
                 </p>
               </div>
