@@ -44,6 +44,7 @@ const SCOPE_LABELS: Record<string, string> = {
   "withdrawals.manage": "Manage withdrawals (approve/reject)",
   "admins.manage": "Manage admin roles",
   "roi.manage": "Manage ROI adjustments & reconciliation",
+  "referrals.manage": "Manage referral program settings",
 };
 
 const ALL_SCOPES = Object.keys(SCOPE_LABELS);

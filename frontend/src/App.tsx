@@ -10,6 +10,7 @@ import { ProjectDetailPage } from "./pages/ProjectDetailPage";
 import { PortfolioPage } from "./pages/PortfolioPage";
 import { InvestmentDetailPage } from "./pages/InvestmentDetailPage";
 import { WalletPage } from "./pages/WalletPage";
+import { ReferralDashboardPage } from "./pages/ReferralDashboardPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { AdminPage } from "./pages/AdminPage";
 import { AdminUsersPage } from "./pages/AdminUsersPage";
@@ -24,6 +25,7 @@ import { AdminWithdrawalsPage } from "./pages/AdminWithdrawalsPage";
 import { AdminWithdrawalDetailPage } from "./pages/AdminWithdrawalDetailPage";
 import { AdminRoiPage } from "./pages/AdminRoiPage";
 import { AdminRoiDetailPage } from "./pages/AdminRoiDetailPage";
+import { AdminReferralConfigPage } from "./pages/AdminReferralConfigPage";
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   const user = useAuthStore((s) => s.user);
@@ -87,6 +89,14 @@ export default function App() {
           }
         />
         <Route path="/profile" element={<Navigate to="/dashboard" replace />} />
+        <Route
+          path="/referrals"
+          element={
+            <RequireAuth>
+              <ReferralDashboardPage />
+            </RequireAuth>
+          }
+        />
       </Route>
 
       {/* Admin Routes */}
@@ -191,6 +201,14 @@ export default function App() {
         element={
           <RequireAuth>
             <AdminRoiDetailPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/referrals"
+        element={
+          <RequireAuth>
+            <AdminReferralConfigPage />
           </RequireAuth>
         }
       />

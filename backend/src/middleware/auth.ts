@@ -46,6 +46,7 @@ export const ADMIN_SCOPES = [
   "withdrawals.manage",
   "admins.manage",
   "roi.manage",
+  "referrals.manage",
 ] as const;
 
 export type AdminScope = (typeof ADMIN_SCOPES)[number];

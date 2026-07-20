@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
-import { useNavigate, Link } from "react-router-dom";
-import { ArrowRight, Globe2, Lock, Mail, User } from "lucide-react";
+import { useNavigate, useSearchParams, Link } from "react-router-dom";
+import { ArrowRight, Gift, Globe2, Lock, Mail, User } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
 import { useAuthStore } from "../lib/store";
@@ -18,12 +18,14 @@ import {
 
 export function SignupPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const setSession = useAuthStore((s) => s.setSession);
   const [form, setForm] = useState({
     fullName: "",
     email: "",
     password: "",
     country: "GH",
+    referralCode: searchParams.get("ref") ?? "",
   });
   const [loading, setLoading] = useState(false);
 
@@ -110,6 +112,19 @@ export function SignupPage() {
               ))}
             </SelectContent>
           </Select>
+        </div>
+
+        <div>
+          <Label htmlFor="referralCode">Referral code (optional)</Label>
+          <Input
+            id="referralCode"
+            icon={<Gift size={18} />}
+            value={form.referralCode}
+            onChange={(e) =>
+              setForm({ ...form, referralCode: e.target.value.toUpperCase() })
+            }
+            placeholder="e.g. AFRI5K3N"
+          />
         </div>
 
         <Button

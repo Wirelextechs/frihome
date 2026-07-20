@@ -11,6 +11,7 @@ import {
   payouts,
 } from "../db/schema.js";
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
+import { creditReferralRewards } from "../lib/referrals.js";
 
 export const investmentsRouter = Router();
 
@@ -119,6 +120,10 @@ investmentsRouter.post("/", requireAuth, async (req: AuthedRequest, res) => {
         updatedAt: new Date(),
       },
     });
+
+  await creditReferralRewards(userId, investment.id, amountGhs).catch((err) =>
+    console.error("Failed to credit referral rewards:", err),
+  );
 
   res.status(201).json({ investment });
 });

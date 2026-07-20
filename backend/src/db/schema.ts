@@ -8,6 +8,7 @@ import {
   boolean,
   jsonb,
   pgEnum,
+  smallint,
 } from "drizzle-orm/pg-core";
 
 export const kycStatusEnum = pgEnum("kyc_status", [
@@ -42,6 +43,7 @@ export const walletTxTypeEnum = pgEnum("wallet_tx_type", [
   "investment",
   "payout",
   "refund",
+  "referral_reward",
 ]);
 
 export const walletTxStatusEnum = pgEnum("wallet_tx_status", [
@@ -60,6 +62,11 @@ export const fundingStatusEnum = pgEnum("funding_status", [
   "open",
   "target_reached",
   "stopped",
+]);
+
+export const referralRewardStatusEnum = pgEnum("referral_reward_status", [
+  "credited",
+  "reversed",
 ]);
 
 export const users = pgTable("users", {
@@ -268,6 +275,70 @@ export const adminPermissions = pgTable("admin_permissions", {
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
   permission: varchar("permission", { length: 100 }).notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const referralCodes = pgTable("referral_codes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" })
+    .unique(),
+  code: varchar("code", { length: 12 }).notNull().unique(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const referralRelationships = pgTable("referral_relationships", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  referrerId: uuid("referrer_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  refereeId: uuid("referee_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  level: smallint("level").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const referralRewards = pgTable("referral_rewards", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  referrerId: uuid("referrer_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  refereeId: uuid("referee_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  level: smallint("level").notNull(),
+  investmentId: uuid("investment_id")
+    .notNull()
+    .references(() => investments.id, { onDelete: "cascade" }),
+  investmentAmountGhs: numeric("investment_amount_ghs", {
+    precision: 14,
+    scale: 2,
+  }).notNull(),
+  rewardPercentage: numeric("reward_percentage", {
+    precision: 5,
+    scale: 2,
+  }).notNull(),
+  rewardAmountGhs: numeric("reward_amount_ghs", {
+    precision: 14,
+    scale: 2,
+  }).notNull(),
+  status: referralRewardStatusEnum("status").notNull().default("credited"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const referralConfig = pgTable("referral_config", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  level: smallint("level").notNull().unique(),
+  rewardPercentage: numeric("reward_percentage", { precision: 5, scale: 2 })
+    .notNull()
+    .default("0"),
+  isActive: boolean("is_active").notNull().default(true),
+  updatedBy: uuid("updated_by").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

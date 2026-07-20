@@ -9,6 +9,7 @@ import {
   signAccessToken,
   signRefreshToken,
 } from "../lib/auth.js";
+import { applyReferralCode } from "../lib/referrals.js";
 
 export const authRouter = Router();
 
@@ -38,6 +39,7 @@ const signupSchema = z.object({
   password: z.string().min(8),
   fullName: z.string().min(2),
   country: z.string().length(2),
+  referralCode: z.string().trim().max(12).optional(),
 });
 
 authRouter.post("/signup", async (req, res) => {
@@ -45,7 +47,7 @@ authRouter.post("/signup", async (req, res) => {
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.flatten() });
   }
-  const { email, password, fullName, country } = parsed.data;
+  const { email, password, fullName, country, referralCode } = parsed.data;
   const countryCode = country.toUpperCase();
 
   const existing = await db
@@ -78,6 +80,12 @@ authRouter.post("/signup", async (req, res) => {
       role: users.role,
       kycStatus: users.kycStatus,
     });
+
+  if (referralCode) {
+    await applyReferralCode(user.id, referralCode).catch((err) =>
+      console.error("Failed to apply referral code:", err),
+    );
+  }
 
   const accessToken = signAccessToken({ userId: user.id, role: user.role });
   const refreshToken = signRefreshToken({ userId: user.id, role: user.role });

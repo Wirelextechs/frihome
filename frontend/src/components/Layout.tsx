@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
-import { Building2, LayoutDashboard, LogOut, PieChart, Wallet, Settings } from "lucide-react";
+import { Building2, Gift, LayoutDashboard, LogOut, PieChart, Wallet, Settings } from "lucide-react";
 import { useAuthStore } from "../lib/store";
 import { Toaster } from "./ui/sonner";
 
@@ -31,6 +31,14 @@ export function Layout() {
           </Link>
           {user ? (
             <div className="flex items-center gap-2">
+              <Link
+                to="/referrals"
+                className="grid h-9 w-9 place-items-center rounded-full border border-border text-ink-500 transition active:scale-95 hover:border-primary/20 hover:bg-primary/10 hover:text-primary"
+                aria-label="Refer and earn"
+                title="Refer & Earn"
+              >
+                <Gift size={16} />
+              </Link>
               {user.role === "admin" && (
                 <Link
                   to="/admin"

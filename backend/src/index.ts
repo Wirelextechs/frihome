@@ -12,6 +12,7 @@ import { paymentsRouter } from "./routes/payments.js";
 import { usersRouter } from "./routes/users.js";
 import { walletRouter } from "./routes/wallet.js";
 import { adminRouter } from "./routes/admin.js";
+import { referralsRouter } from "./routes/referrals.js";
 import { runDailyRoiAccrual } from "./lib/roiAccrual.js";
 
 const app = express();
@@ -37,6 +38,7 @@ app.use("/api/payments", paymentsRouter);
 app.use("/api/users", usersRouter);
 app.use("/api/wallet", walletRouter);
 app.use("/api/admin", adminRouter);
+app.use("/api/referrals", referralsRouter);
 
 // When deployed as a single service, the frontend is built to
 // frontend/dist and served directly by this server — so Render (or any

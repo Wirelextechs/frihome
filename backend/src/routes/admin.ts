@@ -1,6 +1,7 @@
 import { Router } from "express";
 import multer from "multer";
 import { eq, gte, and, desc, sql, or, ilike } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { db } from "../db/index.js";
 import {
@@ -16,6 +17,8 @@ import {
   withdrawalMethods,
   payouts,
   portfolios,
+  referralConfig,
+  referralRewards,
 } from "../db/schema.js";
 import {
   requireAuth,
@@ -1178,3 +1181,127 @@ adminRouter.post(
     }
   },
 );
+
+// ============ REFERRAL PROGRAM ============
+
+adminRouter.get("/referral-config", async (_req: AuthedRequest, res) => {
+  try {
+    const rows = await db
+      .select({
+        level: referralConfig.level,
+        rewardPercentage: referralConfig.rewardPercentage,
+        isActive: referralConfig.isActive,
+        updatedAt: referralConfig.updatedAt,
+        updatedByEmail: users.email,
+      })
+      .from(referralConfig)
+      .leftJoin(users, eq(users.id, referralConfig.updatedBy))
+      .orderBy(referralConfig.level);
+
+    res.json({ data: rows });
+  } catch (error) {
+    console.error("Error fetching referral config:", error);
+    res.status(500).json({ error: "Failed to fetch referral config" });
+  }
+});
+
+const referralConfigSchema = z.object({
+  level: z.number().int().min(1).max(3),
+  rewardPercentage: z.coerce.number().min(0).max(100),
+  isActive: z.boolean().optional(),
+});
+
+adminRouter.post(
+  "/referral-config",
+  requirePermission("referrals.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const parsed = referralConfigSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.flatten() });
+      }
+      const { level, rewardPercentage, isActive } = parsed.data;
+
+      const [updated] = await db
+        .insert(referralConfig)
+        .values({
+          level,
+          rewardPercentage: rewardPercentage.toFixed(2),
+          isActive: isActive ?? true,
+          updatedBy: req.user!.userId,
+        })
+        .onConflictDoUpdate({
+          target: referralConfig.level,
+          set: {
+            rewardPercentage: rewardPercentage.toFixed(2),
+            ...(isActive !== undefined && { isActive }),
+            updatedBy: req.user!.userId,
+            updatedAt: new Date(),
+          },
+        })
+        .returning();
+
+      await logAdminAction(
+        req.user!.userId,
+        "REFERRAL_CONFIG_UPDATED",
+        "referral_config",
+        String(level),
+        { level, rewardPercentage, isActive },
+      );
+
+      res.json({ data: updated });
+    } catch (error) {
+      console.error("Error updating referral config:", error);
+      res.status(500).json({ error: "Failed to update referral config" });
+    }
+  },
+);
+
+adminRouter.get("/referral-rewards", async (req: AuthedRequest, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const limit = 30;
+    const offset = (page - 1) * limit;
+
+    const referrerUsers = alias(users, "referrer_users");
+    const refereeUsers = alias(users, "referee_users");
+    const rows = await db
+      .select({
+        id: referralRewards.id,
+        level: referralRewards.level,
+        investmentAmountGhs: referralRewards.investmentAmountGhs,
+        rewardPercentage: referralRewards.rewardPercentage,
+        rewardAmountGhs: referralRewards.rewardAmountGhs,
+        status: referralRewards.status,
+        createdAt: referralRewards.createdAt,
+        referrerEmail: referrerUsers.email,
+        refereeEmail: refereeUsers.email,
+      })
+      .from(referralRewards)
+      .innerJoin(referrerUsers, eq(referrerUsers.id, referralRewards.referrerId))
+      .innerJoin(refereeUsers, eq(refereeUsers.id, referralRewards.refereeId))
+      .orderBy(desc(referralRewards.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    const countResult = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(referralRewards);
+
+    const summaryResult = await db
+      .select({ total: sql<string>`COALESCE(SUM(reward_amount_ghs), 0)` })
+      .from(referralRewards)
+      .where(eq(referralRewards.status, "credited"));
+
+    res.json({
+      data: rows,
+      total: countResult[0]?.count || 0,
+      page,
+      limit,
+      totalRewardedGhs: Number(summaryResult[0]?.total || 0).toFixed(2),
+    });
+  } catch (error) {
+    console.error("Error fetching referral rewards:", error);
+    res.status(500).json({ error: "Failed to fetch referral rewards" });
+  }
+});
