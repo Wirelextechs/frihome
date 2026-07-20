@@ -35,9 +35,25 @@ investmentsRouter.post("/", requireAuth, async (req: AuthedRequest, res) => {
   if (!project || !project.isActive) {
     return res.status(404).json({ error: "Project not found" });
   }
+  if (project.fundingStatus !== "open") {
+    return res.status(400).json({
+      error:
+        project.fundingStatus === "target_reached"
+          ? "This project has reached its funding target and is no longer accepting investments"
+          : "This project is no longer accepting investments",
+    });
+  }
   if (Number(amountGhs) < Number(project.minInvestmentGhs)) {
     return res.status(400).json({
       error: `Minimum investment is ${project.minInvestmentGhs} GHS`,
+    });
+  }
+  if (
+    project.maxInvestmentGhs != null &&
+    Number(amountGhs) > Number(project.maxInvestmentGhs)
+  ) {
+    return res.status(400).json({
+      error: `Maximum investment is ${project.maxInvestmentGhs} GHS`,
     });
   }
 
@@ -84,6 +100,14 @@ investmentsRouter.post("/", requireAuth, async (req: AuthedRequest, res) => {
     .update(projects)
     .set({ raisedAmountGhs: sql`${projects.raisedAmountGhs} + ${amountGhs}` })
     .where(eq(projects.id, projectId));
+
+  const newRaised = Number(project.raisedAmountGhs) + amount;
+  if (newRaised >= Number(project.targetAmountGhs) && project.fundingStatus === "open") {
+    await db
+      .update(projects)
+      .set({ fundingStatus: "target_reached" })
+      .where(eq(projects.id, projectId));
+  }
 
   await db
     .insert(portfolios)

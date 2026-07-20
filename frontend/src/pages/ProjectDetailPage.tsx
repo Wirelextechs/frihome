@@ -16,13 +16,25 @@ interface Project {
   title: string;
   description: string;
   location: string;
-  targetAmountGhs: string;
-  raisedAmountGhs: string;
   minInvestmentGhs: string;
+  maxInvestmentGhs: string | null;
   expectedReturnPct: string;
   durationMonths: string;
   imageUrl: string | null;
+  fundingStatus: "open" | "target_reached" | "stopped";
 }
+
+const STATUS_LABEL: Record<Project["fundingStatus"], string> = {
+  open: "Open for investment",
+  target_reached: "Fully funded",
+  stopped: "Closed",
+};
+
+const STATUS_COLOR: Record<Project["fundingStatus"], string> = {
+  open: "bg-green-50 text-green-700",
+  target_reached: "bg-blue-50 text-blue-700",
+  stopped: "bg-ink-100 text-ink-500",
+};
 
 export function ProjectDetailPage() {
   const { id } = useParams();
@@ -67,10 +79,7 @@ export function ProjectDetailPage() {
     );
   }
 
-  const pct = Math.min(
-    100,
-    (Number(project.raisedAmountGhs) / Number(project.targetAmountGhs)) * 100,
-  );
+  const isOpen = project.fundingStatus === "open";
 
   return (
     <div className="space-y-5 py-2 animate-in fade-in-0 duration-300">
@@ -95,9 +104,16 @@ export function ProjectDetailPage() {
       )}
 
       <div>
-        <h1 className="text-xl font-extrabold tracking-tight text-ink-900">
-          {project.title}
-        </h1>
+        <div className="flex items-center justify-between gap-2">
+          <h1 className="text-xl font-extrabold tracking-tight text-ink-900">
+            {project.title}
+          </h1>
+          <span
+            className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS_COLOR[project.fundingStatus]}`}
+          >
+            {STATUS_LABEL[project.fundingStatus]}
+          </span>
+        </div>
         <p className="mt-1 text-sm text-ink-500">{project.location}</p>
       </div>
 
@@ -105,28 +121,7 @@ export function ProjectDetailPage() {
         {project.description}
       </p>
 
-      <div>
-        <div className="h-2 overflow-hidden rounded-full bg-ink-100">
-          <div
-            className="h-full rounded-full bg-primary transition-all duration-500"
-            style={{ width: `${pct}%` }}
-          />
-        </div>
-        <p className="mt-2 text-xs font-medium text-ink-500">
-          {formatCurrency(
-            convertFromGhs(Number(project.raisedAmountGhs), currency),
-            currency,
-          )}{" "}
-          of{" "}
-          {formatCurrency(
-            convertFromGhs(Number(project.targetAmountGhs), currency),
-            currency,
-          )}{" "}
-          raised
-        </p>
-      </div>
-
-      <div className="grid grid-cols-3 gap-3">
+      <div className={`grid gap-3 ${project.maxInvestmentGhs ? "grid-cols-4" : "grid-cols-3"}`}>
         <Card className="p-3 text-center">
           <Coins size={16} className="mx-auto text-primary" />
           <p className="mt-1.5 text-xs font-semibold text-ink-900">
@@ -137,6 +132,18 @@ export function ProjectDetailPage() {
           </p>
           <p className="text-[10px] text-ink-400">Minimum</p>
         </Card>
+        {project.maxInvestmentGhs && (
+          <Card className="p-3 text-center">
+            <Coins size={16} className="mx-auto text-primary" />
+            <p className="mt-1.5 text-xs font-semibold text-ink-900">
+              {formatCurrency(
+                convertFromGhs(Number(project.maxInvestmentGhs), currency),
+                currency,
+              )}
+            </p>
+            <p className="text-[10px] text-ink-400">Maximum</p>
+          </Card>
+        )}
         <Card className="p-3 text-center">
           <TrendingUp size={16} className="mx-auto text-primary" />
           <p className="mt-1.5 text-xs font-semibold text-ink-900">
@@ -154,30 +161,41 @@ export function ProjectDetailPage() {
       </div>
 
       <Card className="p-4">
-        <Label htmlFor="amount">Investment amount (GHS)</Label>
-        <Input
-          id="amount"
-          type="number"
-          min={project.minInvestmentGhs}
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          placeholder={project.minInvestmentGhs}
-        />
-        <Button
-          onClick={handleInvest}
-          disabled={investing || !amount}
-          variant="brand"
-          size="lg"
-          className="mt-4 w-full"
-        >
-          {investing ? "Processing…" : user ? "Invest now" : "Log in to invest"}
-        </Button>
-        {!user && (
-          <p className="mt-2 text-center text-xs text-ink-400">
-            <Link to="/login" className="font-semibold text-primary">
-              Log in
-            </Link>{" "}
-            to complete your investment.
+        {isOpen ? (
+          <>
+            <Label htmlFor="amount">Investment amount (GHS)</Label>
+            <Input
+              id="amount"
+              type="number"
+              min={project.minInvestmentGhs}
+              max={project.maxInvestmentGhs ?? undefined}
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder={project.minInvestmentGhs}
+            />
+            <Button
+              onClick={handleInvest}
+              disabled={investing || !amount}
+              variant="brand"
+              size="lg"
+              className="mt-4 w-full"
+            >
+              {investing ? "Processing…" : user ? "Invest now" : "Log in to invest"}
+            </Button>
+            {!user && (
+              <p className="mt-2 text-center text-xs text-ink-400">
+                <Link to="/login" className="font-semibold text-primary">
+                  Log in
+                </Link>{" "}
+                to complete your investment.
+              </p>
+            )}
+          </>
+        ) : (
+          <p className="text-center text-sm font-medium text-ink-500">
+            {project.fundingStatus === "target_reached"
+              ? "This project has reached its funding target and is no longer accepting investments."
+              : "This project is no longer accepting investments."}
           </p>
         )}
       </Card>

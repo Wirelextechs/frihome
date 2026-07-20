@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Ban, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, Ban, CheckCircle2, ShieldPlus, ShieldMinus } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
 
@@ -12,6 +12,7 @@ interface UserDetail {
     country: string;
     role: string;
     kycStatus: string;
+    isSuspended: boolean;
     createdAt: string;
   };
   kyc: {
@@ -33,7 +34,18 @@ interface UserDetail {
     status: string;
     createdAt: string;
   }[];
+  permissions: string[];
 }
+
+const SCOPE_LABELS: Record<string, string> = {
+  "users.manage": "Manage users (suspend/activate)",
+  "kyc.manage": "Manage KYC (approve/reject)",
+  "projects.manage": "Manage projects (create/edit/funding status)",
+  "withdrawals.manage": "Manage withdrawals (approve/reject)",
+  "admins.manage": "Manage admin roles",
+};
+
+const ALL_SCOPES = Object.keys(SCOPE_LABELS);
 
 export function AdminUserDetailPage() {
   const { userId } = useParams();
@@ -41,12 +53,17 @@ export function AdminUserDetailPage() {
   const [data, setData] = useState<UserDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
+  const [showRoleForm, setShowRoleForm] = useState(false);
+  const [level, setLevel] = useState<"full" | "limited">("limited");
+  const [selectedScopes, setSelectedScopes] = useState<string[]>([]);
 
   const fetchUser = async () => {
     try {
       setLoading(true);
       const res = await api.get(`/api/admin/users/${userId}`);
       setData(res.data);
+      setSelectedScopes(res.data.permissions?.filter((p: string) => p !== "*") ?? []);
+      setLevel(res.data.permissions?.includes("*") ? "full" : "limited");
     } catch (error) {
       console.error("Error:", error);
       toast.error("Failed to load user");
@@ -87,6 +104,42 @@ export function AdminUserDetailPage() {
     }
   };
 
+  const handleSaveRole = async () => {
+    try {
+      setActing(true);
+      await api.post(`/api/admin/users/${userId}/promote`, {
+        level,
+        permissions: level === "limited" ? selectedScopes : undefined,
+      });
+      toast.success("Admin access updated");
+      setShowRoleForm(false);
+      fetchUser();
+    } catch (error: any) {
+      toast.error(error.response?.data?.error ?? "Failed to update admin access");
+    } finally {
+      setActing(false);
+    }
+  };
+
+  const handleRevokeAdmin = async () => {
+    try {
+      setActing(true);
+      await api.post(`/api/admin/users/${userId}/demote`);
+      toast.success("Admin access revoked");
+      fetchUser();
+    } catch (error: any) {
+      toast.error(error.response?.data?.error ?? "Failed to revoke admin access");
+    } finally {
+      setActing(false);
+    }
+  };
+
+  function toggleScope(scope: string) {
+    setSelectedScopes((prev) =>
+      prev.includes(scope) ? prev.filter((s) => s !== scope) : [...prev, scope],
+    );
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-background p-6">
@@ -108,7 +161,9 @@ export function AdminUserDetailPage() {
     );
   }
 
-  const { user, kyc, wallet, investments, recentTxns } = data;
+  const { user, kyc, wallet, investments, recentTxns, permissions } = data;
+  const isAdmin = user.role === "admin";
+  const isFullAdmin = permissions.includes("*");
 
   return (
     <div className="min-h-screen bg-background p-6">
@@ -122,13 +177,22 @@ export function AdminUserDetailPage() {
         </button>
 
         <div className="rounded-lg border border-border bg-card p-6 mb-6">
-          <div className="flex items-start justify-between">
+          <div className="flex items-start justify-between flex-wrap gap-3">
             <div>
               <h1 className="text-2xl font-bold text-ink-900">{user.fullName}</h1>
               <p className="text-ink-600">{user.email}</p>
             </div>
             <div className="flex gap-2">
-              {user.role !== "admin" && (
+              {user.isSuspended ? (
+                <button
+                  onClick={handleActivate}
+                  disabled={acting}
+                  className="flex items-center gap-2 rounded-lg bg-green-50 px-4 py-2 text-sm font-medium text-green-700 hover:bg-green-100 disabled:opacity-50"
+                >
+                  <CheckCircle2 size={16} />
+                  Activate
+                </button>
+              ) : (
                 <button
                   onClick={handleSuspend}
                   disabled={acting}
@@ -138,14 +202,6 @@ export function AdminUserDetailPage() {
                   Suspend
                 </button>
               )}
-              <button
-                onClick={handleActivate}
-                disabled={acting}
-                className="flex items-center gap-2 rounded-lg bg-green-50 px-4 py-2 text-sm font-medium text-green-700 hover:bg-green-100 disabled:opacity-50"
-              >
-                <CheckCircle2 size={16} />
-                Activate
-              </button>
             </div>
           </div>
 
@@ -174,10 +230,10 @@ export function AdminUserDetailPage() {
             </div>
             <div>
               <p className="text-xs font-semibold text-ink-500 uppercase">
-                Joined
+                Account Status
               </p>
-              <p className="text-sm font-semibold text-ink-900">
-                {new Date(user.createdAt).toLocaleDateString()}
+              <p className={`text-sm font-semibold ${user.isSuspended ? "text-red-600" : "text-green-600"}`}>
+                {user.isSuspended ? "Suspended" : "Active"}
               </p>
             </div>
           </div>
@@ -200,6 +256,101 @@ export function AdminUserDetailPage() {
                   {kyc.whatsappNumber}
                 </p>
               </div>
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-lg border border-border bg-card p-6 mb-6">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <h2 className="text-lg font-bold text-ink-900">Admin Access</h2>
+              {isAdmin ? (
+                <p className="text-sm text-ink-600 mt-1">
+                  {isFullAdmin
+                    ? "Full admin — access to everything"
+                    : permissions.length > 0
+                      ? `Limited admin — ${permissions.map((p) => SCOPE_LABELS[p] ?? p).join(", ")}`
+                      : "Limited admin — no permissions granted"}
+                </p>
+              ) : (
+                <p className="text-sm text-ink-600 mt-1">Regular investor account</p>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowRoleForm((v) => !v)}
+                disabled={acting}
+                className="flex items-center gap-2 rounded-lg bg-primary/10 px-4 py-2 text-sm font-medium text-primary hover:bg-primary/20 disabled:opacity-50"
+              >
+                <ShieldPlus size={16} />
+                {isAdmin ? "Edit Access" : "Make Admin"}
+              </button>
+              {isAdmin && (
+                <button
+                  onClick={handleRevokeAdmin}
+                  disabled={acting}
+                  className="flex items-center gap-2 rounded-lg bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
+                >
+                  <ShieldMinus size={16} />
+                  Revoke Admin
+                </button>
+              )}
+            </div>
+          </div>
+
+          {showRoleForm && (
+            <div className="mt-4 pt-4 border-t border-border">
+              <div className="flex gap-3 mb-4">
+                <button
+                  onClick={() => setLevel("full")}
+                  className={`flex-1 rounded-lg border px-4 py-2 text-sm font-medium transition ${
+                    level === "full"
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-border text-ink-600 hover:bg-ink-50"
+                  }`}
+                >
+                  Full Access
+                </button>
+                <button
+                  onClick={() => setLevel("limited")}
+                  className={`flex-1 rounded-lg border px-4 py-2 text-sm font-medium transition ${
+                    level === "limited"
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-border text-ink-600 hover:bg-ink-50"
+                  }`}
+                >
+                  Limited Access
+                </button>
+              </div>
+
+              {level === "limited" && (
+                <div className="space-y-2 mb-4">
+                  {ALL_SCOPES.map((scope) => (
+                    <label
+                      key={scope}
+                      className="flex items-center gap-3 rounded-lg border border-border p-3 cursor-pointer hover:bg-ink-50"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedScopes.includes(scope)}
+                        onChange={() => toggleScope(scope)}
+                        className="h-4 w-4"
+                      />
+                      <span className="text-sm text-ink-700">
+                        {SCOPE_LABELS[scope]}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              )}
+
+              <button
+                onClick={handleSaveRole}
+                disabled={acting}
+                className="w-full rounded-lg bg-primary py-2.5 font-semibold text-primary-foreground disabled:opacity-50"
+              >
+                {acting ? "Saving..." : "Save Admin Access"}
+              </button>
             </div>
           )}
         </div>

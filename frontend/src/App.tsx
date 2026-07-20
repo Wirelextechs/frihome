@@ -16,9 +16,12 @@ import { AdminUsersPage } from "./pages/AdminUsersPage";
 import { AdminUserDetailPage } from "./pages/AdminUserDetailPage";
 import { AdminKycPage } from "./pages/AdminKycPage";
 import { AdminProjectsPage } from "./pages/AdminProjectsPage";
+import { AdminProjectEditPage } from "./pages/AdminProjectEditPage";
 import { AdminFinancialsPage } from "./pages/AdminFinancialsPage";
 import { AdminPaymentsPage } from "./pages/AdminPaymentsPage";
+import { AdminPaymentDetailPage } from "./pages/AdminPaymentDetailPage";
 import { AdminWithdrawalsPage } from "./pages/AdminWithdrawalsPage";
+import { AdminWithdrawalDetailPage } from "./pages/AdminWithdrawalDetailPage";
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   const user = useAuthStore((s) => s.user);
@@ -126,6 +129,14 @@ export default function App() {
         }
       />
       <Route
+        path="/admin/projects/:projectId"
+        element={
+          <RequireAuth>
+            <AdminProjectEditPage />
+          </RequireAuth>
+        }
+      />
+      <Route
         path="/admin/financials"
         element={
           <RequireAuth>
@@ -142,10 +153,26 @@ export default function App() {
         }
       />
       <Route
+        path="/admin/payments/:paymentId"
+        element={
+          <RequireAuth>
+            <AdminPaymentDetailPage />
+          </RequireAuth>
+        }
+      />
+      <Route
         path="/admin/withdrawals"
         element={
           <RequireAuth>
             <AdminWithdrawalsPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/withdrawals/:txnId"
+        element={
+          <RequireAuth>
+            <AdminWithdrawalDetailPage />
           </RequireAuth>
         }
       />

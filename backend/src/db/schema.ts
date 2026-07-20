@@ -56,6 +56,12 @@ export const withdrawalMethodTypeEnum = pgEnum("withdrawal_method_type", [
   "crypto",
 ]);
 
+export const fundingStatusEnum = pgEnum("funding_status", [
+  "open",
+  "target_reached",
+  "stopped",
+]);
+
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   email: varchar("email", { length: 255 }).notNull().unique(),
@@ -105,6 +111,10 @@ export const projects = pgTable("projects", {
     precision: 14,
     scale: 2,
   }).notNull(),
+  maxInvestmentGhs: numeric("max_investment_ghs", {
+    precision: 14,
+    scale: 2,
+  }),
   expectedReturnPct: numeric("expected_return_pct", {
     precision: 5,
     scale: 2,
@@ -112,6 +122,7 @@ export const projects = pgTable("projects", {
   durationMonths: numeric("duration_months", { precision: 4, scale: 0 }).notNull(),
   imageUrl: text("image_url"),
   isActive: boolean("is_active").notNull().default(true),
+  fundingStatus: fundingStatusEnum("funding_status").notNull().default("open"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

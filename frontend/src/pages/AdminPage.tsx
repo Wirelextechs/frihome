@@ -15,6 +15,7 @@ interface DashboardData {
   aum: string;
   totalDeposits: string;
   totalPayouts: string;
+  totalWithdrawals: string;
   dailyPayoutsCount: number;
   dailyPayoutsAmount: string;
 }
@@ -67,6 +68,12 @@ export function AdminPage() {
       title: "Total Payouts",
       value: dashboard?.totalPayouts,
       icon: DollarSign,
+      onClick: () => navigate("/admin/withdrawals"),
+    },
+    {
+      title: "Total Withdrawals (Completed)",
+      value: dashboard?.totalWithdrawals,
+      icon: CreditCard,
       onClick: () => navigate("/admin/withdrawals"),
     },
     {

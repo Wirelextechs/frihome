@@ -38,6 +38,7 @@ export function AdminFinancialsPage() {
               { label: "AUM", value: data.aum },
               { label: "Total Deposits", value: data.totalDeposits },
               { label: "Total Payouts", value: data.totalPayouts },
+              { label: "Total Withdrawals (Completed)", value: data.totalWithdrawals },
               { label: "Daily Payouts (count)", value: data.dailyPayoutsCount },
             ].map((item) => (
               <div key={item.label} className="rounded-lg border border-border bg-card p-6">

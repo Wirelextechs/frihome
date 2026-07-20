@@ -119,7 +119,11 @@ export function AdminWithdrawalsPage() {
               </thead>
               <tbody>
                 {withdrawals.map((w) => (
-                  <tr key={w.id} className="border-b border-border/50 hover:bg-ink-50/50">
+                  <tr
+                    key={w.id}
+                    onClick={() => navigate(`/admin/withdrawals/${w.id}`)}
+                    className="cursor-pointer border-b border-border/50 hover:bg-ink-50/50"
+                  >
                     <td className="px-6 py-4">
                       <div className="text-sm font-medium text-ink-900">
                         {w.user?.fullName || "Unknown"}
@@ -142,7 +146,7 @@ export function AdminWithdrawalsPage() {
                     <td className="px-6 py-4 text-sm text-ink-600">
                       {new Date(w.createdAt).toLocaleDateString()}
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
                       <div className="flex gap-2">
                         <button
                           onClick={() => handleApprove(w.id)}

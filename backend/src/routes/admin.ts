@@ -1,4 +1,5 @@
 import { Router } from "express";
+import multer from "multer";
 import { eq, gte, and, desc, sql, or, ilike } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db/index.js";
@@ -14,9 +15,27 @@ import {
   adminPermissions,
   withdrawalMethods,
 } from "../db/schema.js";
-import { requireAuth, requireAdmin, type AuthedRequest } from "../middleware/auth.js";
+import {
+  requireAuth,
+  requireAdmin,
+  requirePermission,
+  FULL_ACCESS_PERMISSION,
+  ADMIN_SCOPES,
+  type AuthedRequest,
+} from "../middleware/auth.js";
 import { runDailyRoiAccrual } from "../lib/roiAccrual.js";
-import { hashPassword } from "../lib/auth.js";
+import { uploadProjectImage } from "../lib/storage.js";
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (!file.mimetype.startsWith("image/")) {
+      return cb(new Error("Only image files are allowed"));
+    }
+    cb(null, true);
+  },
+});
 
 export const adminRouter = Router();
 
@@ -134,14 +153,30 @@ adminRouter.get("/users/:userId", async (req: AuthedRequest, res) => {
       .orderBy(desc(walletTransactions.createdAt))
       .limit(10);
 
-    res.json({ user, kyc, wallet, investments: investments_data, recentTxns: txns });
+    const permissionRows =
+      user.role === "admin"
+        ? await db
+            .select({ permission: adminPermissions.permission })
+            .from(adminPermissions)
+            .where(eq(adminPermissions.adminId, userId))
+        : [];
+    const permissions = permissionRows.map((r) => r.permission);
+
+    res.json({
+      user,
+      kyc,
+      wallet,
+      investments: investments_data,
+      recentTxns: txns,
+      permissions,
+    });
   } catch (error) {
     console.error("Error fetching user:", error);
     res.status(500).json({ error: "Failed to fetch user" });
   }
 });
 
-adminRouter.post("/users/:userId/suspend", async (req: AuthedRequest, res) => {
+adminRouter.post("/users/:userId/suspend", requirePermission("users.manage"), async (req: AuthedRequest, res) => {
   try {
     const { userId } = req.params;
     const { reason } = req.body;
@@ -166,7 +201,7 @@ adminRouter.post("/users/:userId/suspend", async (req: AuthedRequest, res) => {
   }
 });
 
-adminRouter.post("/users/:userId/activate", async (req: AuthedRequest, res) => {
+adminRouter.post("/users/:userId/activate", requirePermission("users.manage"), async (req: AuthedRequest, res) => {
   try {
     const { userId } = req.params;
 
@@ -183,6 +218,92 @@ adminRouter.post("/users/:userId/activate", async (req: AuthedRequest, res) => {
     res.status(500).json({ error: "Failed to activate user" });
   }
 });
+
+adminRouter.get("/permissions/scopes", requirePermission("admins.manage"), async (_req, res) => {
+  res.json({ scopes: ADMIN_SCOPES });
+});
+
+const promoteSchema = z.object({
+  level: z.enum(["full", "limited"]),
+  permissions: z.array(z.enum(ADMIN_SCOPES)).optional(),
+});
+
+adminRouter.post(
+  "/users/:userId/promote",
+  requirePermission("admins.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const { userId } = req.params;
+      const parsed = promoteSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.flatten() });
+      }
+      const { level, permissions } = parsed.data;
+
+      const [target] = await db.select().from(users).where(eq(users.id, userId));
+      if (!target) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      await db.update(users).set({ role: "admin" }).where(eq(users.id, userId));
+
+      // Reset existing grants, then re-grant based on the chosen level
+      await db.delete(adminPermissions).where(eq(adminPermissions.adminId, userId));
+
+      if (level === "full") {
+        await db
+          .insert(adminPermissions)
+          .values({ adminId: userId, permission: FULL_ACCESS_PERMISSION });
+      } else {
+        const scopes = permissions ?? [];
+        if (scopes.length > 0) {
+          await db
+            .insert(adminPermissions)
+            .values(scopes.map((permission) => ({ adminId: userId, permission })));
+        }
+      }
+
+      await logAdminAction(req.user!.userId, "PROMOTE_USER", "users", userId, {
+        level,
+        permissions,
+      });
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error promoting user:", error);
+      res.status(500).json({ error: "Failed to promote user" });
+    }
+  },
+);
+
+adminRouter.post(
+  "/users/:userId/demote",
+  requirePermission("admins.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const { userId } = req.params;
+
+      if (userId === req.user!.userId) {
+        return res.status(400).json({ error: "You cannot demote yourself" });
+      }
+
+      const [target] = await db.select().from(users).where(eq(users.id, userId));
+      if (!target) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      await db.update(users).set({ role: "investor" }).where(eq(users.id, userId));
+      await db.delete(adminPermissions).where(eq(adminPermissions.adminId, userId));
+
+      await logAdminAction(req.user!.userId, "DEMOTE_USER", "users", userId);
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error demoting user:", error);
+      res.status(500).json({ error: "Failed to demote user" });
+    }
+  },
+);
 
 // ============ KYC ============
 
@@ -213,7 +334,7 @@ adminRouter.get("/kyc/pending", async (req: AuthedRequest, res) => {
   }
 });
 
-adminRouter.post("/kyc/:kycId/approve", async (req: AuthedRequest, res) => {
+adminRouter.post("/kyc/:kycId/approve", requirePermission("kyc.manage"), async (req: AuthedRequest, res) => {
   try {
     const { kycId } = req.params;
 
@@ -245,7 +366,7 @@ adminRouter.post("/kyc/:kycId/approve", async (req: AuthedRequest, res) => {
   }
 });
 
-adminRouter.post("/kyc/:kycId/reject", async (req: AuthedRequest, res) => {
+adminRouter.post("/kyc/:kycId/reject", requirePermission("kyc.manage"), async (req: AuthedRequest, res) => {
   try {
     const { kycId } = req.params;
     const { reason } = req.body;
@@ -301,20 +422,43 @@ adminRouter.get("/projects", async (req: AuthedRequest, res) => {
   }
 });
 
-const createProjectSchema = z.object({
+adminRouter.get("/projects/:projectId", async (req: AuthedRequest, res) => {
+  try {
+    const [project] = await db
+      .select()
+      .from(projects)
+      .where(eq(projects.id, req.params.projectId));
+
+    if (!project) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    res.json({ data: project });
+  } catch (error) {
+    console.error("Error fetching project:", error);
+    res.status(500).json({ error: "Failed to fetch project" });
+  }
+});
+
+const projectFieldsSchema = z.object({
   title: z.string().min(3),
   description: z.string().min(10),
   location: z.string().min(2),
-  targetAmountGhs: z.string().transform(Number),
-  minInvestmentGhs: z.string().transform(Number),
-  expectedReturnPct: z.string().transform(Number),
-  durationMonths: z.string().transform(Number),
-  imageUrl: z.string().url().optional(),
-});
+  targetAmountGhs: z.coerce.number().positive(),
+  minInvestmentGhs: z.coerce.number().positive(),
+  maxInvestmentGhs: z.coerce.number().positive().optional().nullable(),
+  expectedReturnPct: z.coerce.number().positive(),
+  durationMonths: z.coerce.number().int().positive(),
+  imageUrl: z.string().url().optional().nullable(),
+}).refine(
+  (data) =>
+    data.maxInvestmentGhs == null || data.maxInvestmentGhs >= data.minInvestmentGhs,
+  { message: "Maximum investment must be greater than or equal to minimum investment", path: ["maxInvestmentGhs"] },
+);
 
-adminRouter.post("/projects", async (req: AuthedRequest, res) => {
+adminRouter.post("/projects", requirePermission("projects.manage"), async (req: AuthedRequest, res) => {
   try {
-    const parsed = createProjectSchema.safeParse(req.body);
+    const parsed = projectFieldsSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: parsed.error.flatten() });
     }
@@ -323,11 +467,15 @@ adminRouter.post("/projects", async (req: AuthedRequest, res) => {
     const [project] = await db
       .insert(projects)
       .values({
-        ...data,
+        title: data.title,
+        description: data.description,
+        location: data.location,
         targetAmountGhs: data.targetAmountGhs.toString(),
         minInvestmentGhs: data.minInvestmentGhs.toString(),
+        maxInvestmentGhs: data.maxInvestmentGhs?.toString(),
         expectedReturnPct: data.expectedReturnPct.toString(),
         durationMonths: data.durationMonths.toString(),
+        imageUrl: data.imageUrl,
       })
       .returning();
 
@@ -340,19 +488,38 @@ adminRouter.post("/projects", async (req: AuthedRequest, res) => {
   }
 });
 
-adminRouter.patch("/projects/:projectId", async (req: AuthedRequest, res) => {
+adminRouter.patch("/projects/:projectId", requirePermission("projects.manage"), async (req: AuthedRequest, res) => {
   try {
     const { projectId } = req.params;
-    const updates = req.body;
+    const parsed = projectFieldsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.flatten() });
+    }
+    const { data } = parsed;
 
     const [project] = await db
       .update(projects)
-      .set({ ...updates, updatedAt: new Date() })
+      .set({
+        title: data.title,
+        description: data.description,
+        location: data.location,
+        targetAmountGhs: data.targetAmountGhs.toString(),
+        minInvestmentGhs: data.minInvestmentGhs.toString(),
+        maxInvestmentGhs: data.maxInvestmentGhs?.toString() ?? null,
+        expectedReturnPct: data.expectedReturnPct.toString(),
+        durationMonths: data.durationMonths.toString(),
+        imageUrl: data.imageUrl ?? null,
+        updatedAt: new Date(),
+      })
       .where(eq(projects.id, projectId))
       .returning();
 
+    if (!project) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
     await logAdminAction(req.user!.userId, "UPDATE_PROJECT", "projects", projectId, {
-      updates,
+      updates: data,
     });
 
     res.json(project);
@@ -361,6 +528,69 @@ adminRouter.patch("/projects/:projectId", async (req: AuthedRequest, res) => {
     res.status(500).json({ error: "Failed to update project" });
   }
 });
+
+const fundingStatusSchema = z.object({
+  status: z.enum(["open", "target_reached", "stopped"]),
+});
+
+adminRouter.post(
+  "/projects/:projectId/funding-status",
+  requirePermission("projects.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const { projectId } = req.params;
+      const parsed = fundingStatusSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.flatten() });
+      }
+
+      const [project] = await db
+        .update(projects)
+        .set({ fundingStatus: parsed.data.status, updatedAt: new Date() })
+        .where(eq(projects.id, projectId))
+        .returning();
+
+      if (!project) {
+        return res.status(404).json({ error: "Project not found" });
+      }
+
+      await logAdminAction(
+        req.user!.userId,
+        "SET_FUNDING_STATUS",
+        "projects",
+        projectId,
+        { status: parsed.data.status },
+      );
+
+      res.json(project);
+    } catch (error) {
+      console.error("Error updating funding status:", error);
+      res.status(500).json({ error: "Failed to update funding status" });
+    }
+  },
+);
+
+adminRouter.post(
+  "/uploads/image",
+  requirePermission("projects.manage"),
+  upload.single("image"),
+  async (req: AuthedRequest, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No image file provided" });
+      }
+      const url = await uploadProjectImage(
+        req.file.buffer,
+        req.file.mimetype,
+        req.file.originalname,
+      );
+      res.json({ url });
+    } catch (error) {
+      console.error("Error uploading image:", error);
+      res.status(500).json({ error: "Failed to upload image" });
+    }
+  },
+);
 
 // ============ FINANCIALS ============
 
@@ -395,10 +625,21 @@ adminRouter.get("/financials/dashboard", async (req: AuthedRequest, res) => {
         ),
       );
 
+    const withdrawnResult = await db
+      .select({ total: sql<string>`SUM(amount_ghs)` })
+      .from(walletTransactions)
+      .where(
+        and(
+          eq(walletTransactions.type, "withdrawal"),
+          eq(walletTransactions.status, "completed"),
+        ),
+      );
+
     res.json({
       aum: investedResult[0]?.total || "0",
       totalDeposits: depositedResult[0]?.total || "0",
       totalPayouts: paidOutResult[0]?.total || "0",
+      totalWithdrawals: withdrawnResult[0]?.total || "0",
       dailyPayoutsCount: dailyPayouts[0]?.count || 0,
       dailyPayoutsAmount: dailyPayouts[0]?.total || "0",
     });
@@ -438,6 +679,44 @@ adminRouter.get("/payments/crypto", async (req: AuthedRequest, res) => {
   } catch (error) {
     console.error("Error fetching crypto payments:", error);
     res.status(500).json({ error: "Failed to fetch crypto payments" });
+  }
+});
+
+adminRouter.get("/payments/crypto/:paymentId", async (req: AuthedRequest, res) => {
+  try {
+    const [payment] = await db
+      .select()
+      .from(cryptoPayments)
+      .where(eq(cryptoPayments.id, req.params.paymentId));
+
+    if (!payment) {
+      return res.status(404).json({ error: "Payment not found" });
+    }
+
+    const [user] = await db
+      .select(SAFE_USER_COLUMNS)
+      .from(users)
+      .where(eq(users.id, payment.userId));
+
+    let project = null;
+    if (payment.investmentId) {
+      const [investment] = await db
+        .select()
+        .from(investments)
+        .where(eq(investments.id, payment.investmentId));
+      if (investment) {
+        const [proj] = await db
+          .select()
+          .from(projects)
+          .where(eq(projects.id, investment.projectId));
+        project = proj ?? null;
+      }
+    }
+
+    res.json({ data: { ...payment, user, project } });
+  } catch (error) {
+    console.error("Error fetching crypto payment:", error);
+    res.status(500).json({ error: "Failed to fetch crypto payment" });
   }
 });
 
@@ -494,7 +773,35 @@ adminRouter.get("/withdrawals/pending", async (req: AuthedRequest, res) => {
   }
 });
 
-adminRouter.post("/withdrawals/:txnId/approve", async (req: AuthedRequest, res) => {
+adminRouter.get("/withdrawals/:txnId", async (req: AuthedRequest, res) => {
+  try {
+    const [txn] = await db
+      .select()
+      .from(walletTransactions)
+      .where(eq(walletTransactions.id, req.params.txnId));
+
+    if (!txn) {
+      return res.status(404).json({ error: "Withdrawal not found" });
+    }
+
+    const [user] = await db
+      .select(SAFE_USER_COLUMNS)
+      .from(users)
+      .where(eq(users.id, txn.userId));
+
+    const [withdrawalMethod] = await db
+      .select()
+      .from(withdrawalMethods)
+      .where(eq(withdrawalMethods.userId, txn.userId));
+
+    res.json({ data: { ...txn, user, withdrawalMethod } });
+  } catch (error) {
+    console.error("Error fetching withdrawal:", error);
+    res.status(500).json({ error: "Failed to fetch withdrawal" });
+  }
+});
+
+adminRouter.post("/withdrawals/:txnId/approve", requirePermission("withdrawals.manage"), async (req: AuthedRequest, res) => {
   try {
     const { txnId } = req.params;
 
@@ -521,7 +828,7 @@ adminRouter.post("/withdrawals/:txnId/approve", async (req: AuthedRequest, res) 
   }
 });
 
-adminRouter.post("/withdrawals/:txnId/reject", async (req: AuthedRequest, res) => {
+adminRouter.post("/withdrawals/:txnId/reject", requirePermission("withdrawals.manage"), async (req: AuthedRequest, res) => {
   try {
     const { txnId } = req.params;
     const { reason } = req.body;

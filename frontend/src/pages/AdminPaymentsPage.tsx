@@ -61,7 +61,8 @@ export function AdminPaymentsPage() {
                 {payments.map((p) => (
                   <tr
                     key={p.id}
-                    className="border-b border-border/50 hover:bg-ink-50/50"
+                    onClick={() => navigate(`/admin/payments/${p.id}`)}
+                    className="cursor-pointer border-b border-border/50 hover:bg-ink-50/50"
                   >
                     <td className="px-6 py-4 text-sm font-mono text-ink-600">
                       {p.id.slice(0, 8)}...
