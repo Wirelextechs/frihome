@@ -10,9 +10,18 @@ interface Project {
   id: string;
   title: string;
   location: string;
+  minInvestmentGhs: string;
   expectedReturnPct: string;
+  durationMonths: string;
   imageUrl: string | null;
   fundingStatus: "open" | "target_reached" | "stopped";
+}
+
+function minDailyRoi(p: Project): number {
+  const totalReturn = Number(p.minInvestmentGhs) * (Number(p.expectedReturnPct) / 100);
+  const durationDays = Number(p.durationMonths) * 30;
+  if (durationDays <= 0) return 0;
+  return Math.round((totalReturn / durationDays) * 100) / 100;
 }
 
 const STATUS_LABEL: Record<Project["fundingStatus"], string> = {
@@ -103,6 +112,10 @@ export function ProjectsPage() {
                 >
                   {STATUS_LABEL[p.fundingStatus]}
                 </span>
+                <p className="mt-2 text-xs font-medium text-ink-600">
+                  Min ₵{Number(p.minInvestmentGhs).toLocaleString()} · From ₵
+                  {minDailyRoi(p).toLocaleString()}/day
+                </p>
               </div>
             </Card>
           </Link>

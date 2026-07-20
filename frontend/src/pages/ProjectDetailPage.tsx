@@ -36,6 +36,13 @@ const STATUS_COLOR: Record<Project["fundingStatus"], string> = {
   stopped: "bg-ink-100 text-ink-500",
 };
 
+function minDailyRoi(p: Project): number {
+  const totalReturn = Number(p.minInvestmentGhs) * (Number(p.expectedReturnPct) / 100);
+  const durationDays = Number(p.durationMonths) * 30;
+  if (durationDays <= 0) return 0;
+  return Math.round((totalReturn / durationDays) * 100) / 100;
+}
+
 export function ProjectDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -121,7 +128,7 @@ export function ProjectDetailPage() {
         {project.description}
       </p>
 
-      <div className={`grid gap-3 ${project.maxInvestmentGhs ? "grid-cols-4" : "grid-cols-3"}`}>
+      <div className="grid grid-cols-3 gap-3">
         <Card className="p-3 text-center">
           <Coins size={16} className="mx-auto text-primary" />
           <p className="mt-1.5 text-xs font-semibold text-ink-900">
@@ -157,6 +164,13 @@ export function ProjectDetailPage() {
             {project.durationMonths}mo
           </p>
           <p className="text-[10px] text-ink-400">Duration</p>
+        </Card>
+        <Card className="p-3 text-center">
+          <Coins size={16} className="mx-auto text-primary" />
+          <p className="mt-1.5 text-xs font-semibold text-ink-900">
+            {formatCurrency(convertFromGhs(minDailyRoi(project), currency), currency)}
+          </p>
+          <p className="text-[10px] text-ink-400">Min Daily ROI</p>
         </Card>
       </div>
 
