@@ -1,7 +1,7 @@
 import { Router } from "express";
 import multer from "multer";
 import { z } from "zod";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, and, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
   wallets,
@@ -10,6 +10,10 @@ import {
   users,
   depositSettings,
   manualDeposits,
+  rewardPools,
+  rewardClaims,
+  rewardPoolAudit,
+  auditLogs,
 } from "../db/schema.js";
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import {
@@ -419,5 +423,210 @@ walletRouter.get(
       .orderBy(desc(manualDeposits.createdAt))
       .limit(20);
     res.json({ deposits });
+  },
+);
+
+// ============ REWARD CLAIMS ============
+
+const claimRewardSchema = z.object({
+  code: z.string().min(3).max(20),
+});
+
+walletRouter.post(
+  "/rewards/claim",
+  requireAuth,
+  async (req: AuthedRequest, res) => {
+    const parsed = claimRewardSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.flatten() });
+    }
+
+    const { code } = parsed.data;
+    const userId = req.user!.userId;
+
+    try {
+      // 1. Fetch pool with FOR UPDATE lock (prevents concurrent updates)
+      // Note: Drizzle doesn't have direct FOR UPDATE support yet, so we use raw SQL
+      const poolResult = await db.execute(
+        sql`SELECT * FROM reward_pools WHERE code = ${code} FOR UPDATE LIMIT 1`,
+      );
+
+      if (!poolResult || poolResult.length === 0) {
+        return res.status(404).json({
+          status: "pool_not_found",
+          message: "Reward code not found",
+        });
+      }
+
+      const pool = poolResult[0] as any;
+
+      // 2. Check pool status
+      if (pool.status !== "active") {
+        return res.status(400).json({
+          status: "pool_inactive",
+          message: "This reward pool is no longer active",
+        });
+      }
+
+      // 3. Check expiration (expiresAt includes time)
+      if (pool.expires_at && new Date() > new Date(pool.expires_at)) {
+        await db
+          .update(rewardPools)
+          .set({ status: "expired", updatedAt: new Date() })
+          .where(eq(rewardPools.id, pool.id));
+        return res.status(400).json({
+          status: "pool_expired",
+          message: "This reward pool has expired",
+        });
+      }
+
+      // 4. Check duplicate claims (if allowDuplicateClaims=false)
+      if (!pool.allow_duplicate_claims) {
+        const [existing] = await db
+          .select({ id: rewardClaims.id })
+          .from(rewardClaims)
+          .where(and(eq(rewardClaims.poolId, pool.id), eq(rewardClaims.userId, userId)))
+          .limit(1);
+
+        if (existing) {
+          return res.status(409).json({
+            status: "already_claimed",
+            message: "You have already claimed from this reward pool",
+          });
+        }
+      }
+
+      // 5. Calculate reward amount
+      let claimAmount: number;
+      if (pool.reward_type === "fixed") {
+        claimAmount = Number(pool.fixed_amount_ghs);
+      } else {
+        // random_range
+        const min = Number(pool.min_amount_ghs);
+        const max = Number(pool.max_amount_ghs);
+        claimAmount = Math.random() * (max - min) + min;
+      }
+
+      // 6. Check if pool has enough remaining
+      const claimed = Number(pool.claimed_pool_ghs);
+      const total = Number(pool.total_pool_ghs);
+      const remaining = total - claimed;
+
+      if (claimAmount > remaining) {
+        return res.status(400).json({
+          status: "insufficient_pool",
+          message: "Total reward amount claimed. Try again with the next provided code",
+        });
+      }
+
+      // 7. Check if this claim will exhaust the pool
+      const newClaimed = claimed + claimAmount;
+      const isExhausted = newClaimed >= total;
+
+      // 8. Atomic transaction: wallet credit + claim record + pool update
+      await db.transaction(async (tx) => {
+        // Get or create wallet
+        const [wallet] =
+          (await tx
+            .insert(wallets)
+            .values({ userId })
+            .onConflictDoNothing()
+            .returning()) || [];
+
+        const [currentWallet] = wallet
+          ? [wallet]
+          : await tx.select().from(wallets).where(eq(wallets.userId, userId)).limit(1);
+
+        const balanceBefore = Number(currentWallet.balanceGhs);
+        const balanceAfter = balanceBefore + claimAmount;
+
+        // Update wallet balance
+        await tx
+          .update(wallets)
+          .set({ balanceGhs: balanceAfter.toFixed(2), updatedAt: new Date() })
+          .where(eq(wallets.userId, userId));
+
+        // Create wallet transaction
+        const [txn] = await tx
+          .insert(walletTransactions)
+          .values({
+            userId,
+            type: "reward_claim",
+            amountGhs: claimAmount.toFixed(2),
+            balanceBeforeGhs: balanceBefore.toFixed(2),
+            balanceAfterGhs: balanceAfter.toFixed(2),
+            status: "completed",
+            reference: code,
+            description: `Reward claim from pool ${code}`,
+          })
+          .returning();
+
+        // Create reward claim record
+        await tx.insert(rewardClaims).values({
+          poolId: pool.id,
+          userId,
+          claimedAmountGhs: claimAmount.toFixed(2),
+          transactionId: txn.id,
+          claimResult: "success",
+        });
+
+        // Update pool
+        await tx
+          .update(rewardPools)
+          .set({
+            claimedPoolGhs: newClaimed.toFixed(2),
+            status: isExhausted ? "exhausted" : "active",
+            updatedAt: new Date(),
+          })
+          .where(eq(rewardPools.id, pool.id));
+
+        // Log to audit trail
+        await tx.insert(rewardPoolAudit).values({
+          poolId: pool.id,
+          action: "REWARD_CLAIMED",
+          changes: {
+            claimedAmount: claimAmount,
+            isExhausted,
+            userId,
+          },
+        });
+      });
+
+      res.json({
+        status: "success",
+        claimAmount,
+        isPoolExhausted: isExhausted,
+      });
+    } catch (error) {
+      console.error("Error claiming reward:", error);
+      res.status(500).json({ error: "Failed to claim reward" });
+    }
+  },
+);
+
+walletRouter.get(
+  "/rewards/history",
+  requireAuth,
+  async (req: AuthedRequest, res) => {
+    try {
+      const claims = await db
+        .select({
+          id: rewardClaims.id,
+          poolCode: rewardPools.code,
+          claimedAmountGhs: rewardClaims.claimedAmountGhs,
+          claimedAt: rewardClaims.claimedAt,
+          claimResult: rewardClaims.claimResult,
+        })
+        .from(rewardClaims)
+        .innerJoin(rewardPools, eq(rewardPools.id, rewardClaims.poolId))
+        .where(eq(rewardClaims.userId, req.user!.userId))
+        .orderBy(desc(rewardClaims.claimedAt))
+        .limit(20);
+
+      res.json({ claims });
+    } catch (error) {
+      console.error("Error fetching reward history:", error);
+      res.status(500).json({ error: "Failed to fetch reward history" });
+    }
   },
 );

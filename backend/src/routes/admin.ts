@@ -21,6 +21,9 @@ import {
   referralRewards,
   depositSettings,
   manualDeposits,
+  rewardPools,
+  rewardClaims,
+  rewardPoolAudit,
 } from "../db/schema.js";
 import {
   requireAuth,
@@ -32,6 +35,7 @@ import {
 } from "../middleware/auth.js";
 import { runDailyRoiAccrual } from "../lib/roiAccrual.js";
 import { uploadProjectImage } from "../lib/storage.js";
+import { generateRewardPoolCode } from "../lib/rewardPoolCode.js";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -1565,6 +1569,246 @@ adminRouter.post(
     } catch (error) {
       console.error("Error rejecting manual deposit:", error);
       res.status(500).json({ error: "Failed to reject manual deposit" });
+    }
+  },
+);
+
+// ============ REWARD POOLS ============
+
+const createRewardPoolSchema = z.object({
+  totalPoolGhs: z.number().positive(),
+  rewardType: z.enum(["fixed", "random_range"]),
+  fixedAmountGhs: z.number().positive().optional(),
+  minAmountGhs: z.number().positive().optional(),
+  maxAmountGhs: z.number().positive().optional(),
+  allowDuplicateClaims: z.boolean().optional().default(false),
+  expiresAt: z.string().datetime().optional(),
+});
+
+adminRouter.post(
+  "/rewards/pools",
+  requirePermission("rewards.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const parsed = createRewardPoolSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.flatten() });
+      }
+
+      const code = await generateRewardPoolCode();
+
+      const [pool] = await db
+        .insert(rewardPools)
+        .values({
+          code,
+          totalPoolGhs: parsed.data.totalPoolGhs.toFixed(2),
+          rewardType: parsed.data.rewardType,
+          fixedAmountGhs:
+            parsed.data.rewardType === "fixed"
+              ? parsed.data.fixedAmountGhs!.toFixed(2)
+              : null,
+          minAmountGhs:
+            parsed.data.rewardType === "random_range"
+              ? parsed.data.minAmountGhs!.toFixed(2)
+              : null,
+          maxAmountGhs:
+            parsed.data.rewardType === "random_range"
+              ? parsed.data.maxAmountGhs!.toFixed(2)
+              : null,
+          allowDuplicateClaims: parsed.data.allowDuplicateClaims,
+          expiresAt: parsed.data.expiresAt ? new Date(parsed.data.expiresAt) : null,
+          createdBy: req.user!.userId,
+        })
+        .returning();
+
+      await logAdminAction(
+        req.user!.userId,
+        "REWARD_POOL_CREATED",
+        "reward_pools",
+        pool.id,
+        {
+          code,
+          totalPoolGhs: parsed.data.totalPoolGhs,
+          rewardType: parsed.data.rewardType,
+        },
+      );
+
+      res.json({ data: pool });
+    } catch (error) {
+      console.error("Error creating reward pool:", error);
+      res.status(500).json({ error: "Failed to create reward pool" });
+    }
+  },
+);
+
+adminRouter.get(
+  "/rewards/pools",
+  requirePermission("rewards.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const page = Math.max(1, parseInt(req.query.page as string) || 1);
+      const limit = 20;
+      const offset = (page - 1) * limit;
+      const status = (req.query.status as string) || "";
+
+      const conditions: any[] = [];
+      if (status) {
+        conditions.push(eq(rewardPools.status, status as any));
+      }
+
+      const rows = await db
+        .select({
+          id: rewardPools.id,
+          code: rewardPools.code,
+          totalPoolGhs: rewardPools.totalPoolGhs,
+          claimedPoolGhs: rewardPools.claimedPoolGhs,
+          rewardType: rewardPools.rewardType,
+          status: rewardPools.status,
+          allowDuplicateClaims: rewardPools.allowDuplicateClaims,
+          expiresAt: rewardPools.expiresAt,
+          createdAt: rewardPools.createdAt,
+        })
+        .from(rewardPools)
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .orderBy(desc(rewardPools.createdAt))
+        .limit(limit)
+        .offset(offset);
+
+      const countResult = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(rewardPools)
+        .where(conditions.length > 0 ? and(...conditions) : undefined);
+
+      const poolsWithStats = rows.map((pool) => {
+        const claimed = Number(pool.claimedPoolGhs);
+        const total = Number(pool.totalPoolGhs);
+        return {
+          ...pool,
+          percentClaimed: total > 0 ? (claimed / total) * 100 : 0,
+        };
+      });
+
+      res.json({
+        data: poolsWithStats,
+        total: countResult[0]?.count || 0,
+        page,
+        limit,
+      });
+    } catch (error) {
+      console.error("Error fetching reward pools:", error);
+      res.status(500).json({ error: "Failed to fetch reward pools" });
+    }
+  },
+);
+
+adminRouter.get(
+  "/rewards/pools/:poolId",
+  requirePermission("rewards.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const [pool] = await db
+        .select()
+        .from(rewardPools)
+        .where(eq(rewardPools.id, req.params.poolId))
+        .limit(1);
+
+      if (!pool) {
+        return res.status(404).json({ error: "Reward pool not found" });
+      }
+
+      const page = Math.max(1, parseInt(req.query.page as string) || 1);
+      const limit = 20;
+      const offset = (page - 1) * limit;
+
+      const claims = await db
+        .select({
+          id: rewardClaims.id,
+          userEmail: users.email,
+          userFullName: users.fullName,
+          claimedAmountGhs: rewardClaims.claimedAmountGhs,
+          claimedAt: rewardClaims.claimedAt,
+        })
+        .from(rewardClaims)
+        .innerJoin(users, eq(users.id, rewardClaims.userId))
+        .where(eq(rewardClaims.poolId, req.params.poolId))
+        .orderBy(desc(rewardClaims.claimedAt))
+        .limit(limit)
+        .offset(offset);
+
+      const claimCount = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(rewardClaims)
+        .where(eq(rewardClaims.poolId, req.params.poolId));
+
+      const percentClaimed = Number(pool.totalPoolGhs) > 0
+        ? (Number(pool.claimedPoolGhs) / Number(pool.totalPoolGhs)) * 100
+        : 0;
+
+      res.json({
+        data: {
+          ...pool,
+          percentClaimed,
+          claims,
+          claimCount: claimCount[0]?.count || 0,
+          page,
+          limit,
+        },
+      });
+    } catch (error) {
+      console.error("Error fetching reward pool detail:", error);
+      res.status(500).json({ error: "Failed to fetch reward pool detail" });
+    }
+  },
+);
+
+const updateRewardPoolSchema = z.object({
+  status: z.enum(["active", "exhausted", "expired", "paused"]).optional(),
+  expiresAt: z.string().datetime().optional(),
+});
+
+adminRouter.patch(
+  "/rewards/pools/:poolId",
+  requirePermission("rewards.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const parsed = updateRewardPoolSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.flatten() });
+      }
+
+      const [pool] = await db
+        .select()
+        .from(rewardPools)
+        .where(eq(rewardPools.id, req.params.poolId))
+        .limit(1);
+
+      if (!pool) {
+        return res.status(404).json({ error: "Reward pool not found" });
+      }
+
+      const updates: Record<string, any> = {};
+      if (parsed.data.status) updates.status = parsed.data.status;
+      if (parsed.data.expiresAt) updates.expiresAt = new Date(parsed.data.expiresAt);
+      updates.updatedAt = new Date();
+
+      const [updated] = await db
+        .update(rewardPools)
+        .set(updates)
+        .where(eq(rewardPools.id, req.params.poolId))
+        .returning();
+
+      await logAdminAction(
+        req.user!.userId,
+        "REWARD_POOL_UPDATED",
+        "reward_pools",
+        req.params.poolId,
+        { changes: parsed.data },
+      );
+
+      res.json({ data: updated });
+    } catch (error) {
+      console.error("Error updating reward pool:", error);
+      res.status(500).json({ error: "Failed to update reward pool" });
     }
   },
 );

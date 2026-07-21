@@ -7,6 +7,7 @@ import {
   Copy,
   Coins,
   CreditCard,
+  Gift,
   RefreshCcw,
   Smartphone,
   TrendingUp,
@@ -111,6 +112,145 @@ const typeIcon: Record<string, typeof ArrowDownToLine> = {
   payout: TrendingUp,
   refund: RefreshCcw,
 };
+
+interface RewardClaim {
+  id: string;
+  poolCode: string;
+  claimedAmountGhs: string;
+  claimedAt: string;
+  claimResult: string;
+}
+
+function RewardsTabContent() {
+  const [claimCode, setClaimCode] = useState("");
+  const [claiming, setClaiming] = useState(false);
+  const [claimHistory, setClaimHistory] = useState<RewardClaim[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [lastClaimResult, setLastClaimResult] = useState<{
+    status: string;
+    claimAmount?: number;
+  } | null>(null);
+
+  useEffect(() => {
+    fetchHistory();
+  }, []);
+
+  const fetchHistory = async () => {
+    try {
+      setHistoryLoading(true);
+      const res = await api.get("/api/wallet/rewards/history");
+      setClaimHistory(res.data.claims || []);
+    } catch (error) {
+      console.error("Error fetching reward history:", error);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const handleClaim = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!claimCode.trim()) {
+      toast.error("Please enter a reward code");
+      return;
+    }
+
+    try {
+      setClaiming(true);
+      const res = await api.post("/api/wallet/rewards/claim", { code: claimCode });
+
+      if (res.data.status === "success") {
+        toast.success(
+          `You won ₵${res.data.claimAmount}!${res.data.isPoolExhausted ? " (pool exhausted)" : ""}`,
+        );
+        setLastClaimResult({ status: "success", claimAmount: res.data.claimAmount });
+        setClaimCode("");
+        fetchHistory();
+      } else {
+        const messages: Record<string, string> = {
+          pool_not_found: "Reward code not found",
+          pool_inactive: "This reward pool is no longer active",
+          pool_expired: "This reward pool has expired",
+          already_claimed: "You've already claimed from this reward pool",
+          insufficient_pool: "Total reward amount claimed. Try again with the next provided code",
+        };
+        toast.error(messages[res.data.status] || "Failed to claim reward");
+        setLastClaimResult({ status: res.data.status });
+      }
+    } catch (error: any) {
+      const message = error.response?.data?.error || "Failed to claim reward";
+      toast.error(message);
+      setLastClaimResult({ status: "error" });
+    } finally {
+      setClaiming(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h3 className="mb-3 text-sm font-bold text-ink-700 uppercase">Claim a Reward</h3>
+        <form onSubmit={handleClaim} className="space-y-3">
+          <div>
+            <Label htmlFor="rewardCode">Reward Code</Label>
+            <Input
+              id="rewardCode"
+              value={claimCode}
+              onChange={(e) => setClaimCode(e.target.value)}
+              placeholder="AH-XXXXXXXX"
+              disabled={claiming}
+            />
+          </div>
+          <Button
+            type="submit"
+            size="lg"
+            disabled={claiming}
+            className="w-full"
+            variant="brand"
+          >
+            {claiming ? "Claiming..." : "Claim Reward"}
+          </Button>
+        </form>
+      </div>
+
+      {lastClaimResult && lastClaimResult.status === "success" && (
+        <Card className="border-green-200 bg-green-50 p-4 text-green-900">
+          <p className="text-sm font-medium">
+            ✓ Claimed ₵{lastClaimResult.claimAmount?.toFixed(2)}! Check your wallet.
+          </p>
+        </Card>
+      )}
+
+      <div>
+        <h3 className="mb-3 text-sm font-bold text-ink-700 uppercase">Claim History</h3>
+        {historyLoading ? (
+          <p className="text-sm text-ink-400">Loading history...</p>
+        ) : claimHistory.length === 0 ? (
+          <p className="text-sm text-ink-400">No claims yet. Find reward codes in your community!</p>
+        ) : (
+          <div className="space-y-2">
+            {claimHistory.map((claim) => (
+              <Card key={claim.id} className="flex items-center justify-between px-4 py-3">
+                <div>
+                  <p className="text-sm font-semibold text-ink-900">
+                    Code {claim.poolCode}
+                  </p>
+                  <p className="text-xs text-ink-400">
+                    {new Date(claim.claimedAt).toLocaleDateString()}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm font-semibold text-green-600">
+                    +₵{parseFloat(claim.claimedAmountGhs).toFixed(2)}
+                  </p>
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export function WalletPage() {
   const user = useAuthStore((s) => s.user);
@@ -341,6 +481,10 @@ export function WalletPage() {
             <ArrowUpFromLine size={15} />
             Withdraw
           </TabsTrigger>
+          <TabsTrigger value="rewards">
+            <Gift size={15} />
+            Rewards
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="deposit">
@@ -508,6 +652,12 @@ export function WalletPage() {
               )}
             </Card>
           </div>
+        </TabsContent>
+
+        <TabsContent value="rewards">
+          <Card className="p-4">
+            <RewardsTabContent />
+          </Card>
         </TabsContent>
       </Tabs>
 

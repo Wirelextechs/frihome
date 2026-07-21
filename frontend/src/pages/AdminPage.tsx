@@ -12,6 +12,7 @@ import {
   Scale,
   Gift,
   Smartphone,
+  Trophy,
 } from "lucide-react";
 
 interface DashboardData {
@@ -98,6 +99,7 @@ export function AdminPage() {
     { label: "ROI Reconciliation", icon: Scale, to: "/admin/roi" },
     { label: "Referral Program", icon: Gift, to: "/admin/referrals" },
     { label: "Mobile Money Deposits", icon: Smartphone, to: "/admin/deposits" },
+    { label: "Reward Pools", icon: Trophy, to: "/admin/rewards" },
   ];
 
   return (

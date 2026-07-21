@@ -44,6 +44,7 @@ export const walletTxTypeEnum = pgEnum("wallet_tx_type", [
   "payout",
   "refund",
   "referral_reward",
+  "reward_claim",
 ]);
 
 export const walletTxStatusEnum = pgEnum("wallet_tx_status", [
@@ -73,6 +74,24 @@ export const manualDepositStatusEnum = pgEnum("manual_deposit_status", [
   "pending",
   "approved",
   "rejected",
+]);
+
+export const rewardTypeEnum = pgEnum("reward_type", [
+  "fixed",
+  "random_range",
+]);
+
+export const poolStatusEnum = pgEnum("pool_status", [
+  "active",
+  "exhausted",
+  "expired",
+  "paused",
+]);
+
+export const rewardClaimResultEnum = pgEnum("reward_claim_result", [
+  "success",
+  "pool_exhausted",
+  "already_claimed",
 ]);
 
 export const users = pgTable("users", {
@@ -378,6 +397,59 @@ export const manualDeposits = pgTable("manual_deposits", {
     onDelete: "set null",
   }),
   reviewedAt: timestamp("reviewed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const rewardPools = pgTable("reward_pools", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  code: varchar("code", { length: 20 }).notNull().unique(),
+  totalPoolGhs: numeric("total_pool_ghs", { precision: 14, scale: 2 }).notNull(),
+  claimedPoolGhs: numeric("claimed_pool_ghs", { precision: 14, scale: 2 })
+    .notNull()
+    .default("0"),
+  rewardType: rewardTypeEnum("reward_type").notNull(),
+  fixedAmountGhs: numeric("fixed_amount_ghs", { precision: 14, scale: 2 }),
+  minAmountGhs: numeric("min_amount_ghs", { precision: 14, scale: 2 }),
+  maxAmountGhs: numeric("max_amount_ghs", { precision: 14, scale: 2 }),
+  allowDuplicateClaims: boolean("allow_duplicate_claims").notNull().default(false),
+  expiresAt: timestamp("expires_at"),
+  status: poolStatusEnum("status").notNull().default("active"),
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const rewardClaims = pgTable("reward_claims", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  poolId: uuid("pool_id")
+    .notNull()
+    .references(() => rewardPools.id, { onDelete: "cascade" }),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  claimedAmountGhs: numeric("claimed_amount_ghs", {
+    precision: 14,
+    scale: 2,
+  }).notNull(),
+  transactionId: uuid("transaction_id").references(() => walletTransactions.id, {
+    onDelete: "set null",
+  }),
+  claimResult: rewardClaimResultEnum("claim_result").notNull().default("success"),
+  claimedAt: timestamp("claimed_at").notNull().defaultNow(),
+});
+
+export const rewardPoolAudit = pgTable("reward_pool_audit", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  poolId: uuid("pool_id")
+    .notNull()
+    .references(() => rewardPools.id, { onDelete: "cascade" }),
+  action: varchar("action", { length: 100 }).notNull(),
+  adminId: uuid("admin_id").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  changes: jsonb("changes"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

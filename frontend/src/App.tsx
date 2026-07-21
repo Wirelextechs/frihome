@@ -28,6 +28,8 @@ import { AdminRoiDetailPage } from "./pages/AdminRoiDetailPage";
 import { AdminReferralConfigPage } from "./pages/AdminReferralConfigPage";
 import { AdminDepositsPage } from "./pages/AdminDepositsPage";
 import { AdminDepositDetailPage } from "./pages/AdminDepositDetailPage";
+import { AdminRewardsPage } from "./pages/AdminRewardsPage";
+import { AdminRewardDetailPage } from "./pages/AdminRewardDetailPage";
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   const user = useAuthStore((s) => s.user);
@@ -227,6 +229,22 @@ export default function App() {
         element={
           <RequireAuth>
             <AdminDepositDetailPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/rewards"
+        element={
+          <RequireAuth>
+            <AdminRewardsPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/rewards/:poolId"
+        element={
+          <RequireAuth>
+            <AdminRewardDetailPage />
           </RequireAuth>
         }
       />
