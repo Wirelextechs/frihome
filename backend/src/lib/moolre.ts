@@ -26,22 +26,28 @@ async function validate(params: {
     return { ok: false, error: "Name verification is not configured" };
   }
 
-  const response = await fetch("https://api.moolre.com/open/transact/validate", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-API-USER": apiUser,
-      "X-API-KEY": apiKey,
-    },
-    body: JSON.stringify({
-      type: 1,
-      receiver: params.receiver,
-      channel: params.channel,
-      sublistid: params.sublistid,
-      currency: "GHS",
-      accountnumber: accountNumber,
-    }),
-  });
+  let response: Response;
+  try {
+    response = await fetch("https://api.moolre.com/open/transact/validate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-USER": apiUser,
+        "X-API-KEY": apiKey,
+      },
+      body: JSON.stringify({
+        type: 1,
+        receiver: params.receiver,
+        channel: params.channel,
+        sublistid: params.sublistid,
+        currency: "GHS",
+        accountnumber: accountNumber,
+      }),
+    });
+  } catch (error) {
+    console.error("Moolre validate request failed:", error);
+    return { ok: false, error: "Verification service is temporarily unavailable" };
+  }
 
   const body = (await response.json().catch(() => null)) as {
     status?: number;
@@ -87,9 +93,16 @@ export interface MoolreBank {
 }
 
 export async function getGhanaBanks(): Promise<MoolreBank[]> {
-  const response = await fetch(
-    "https://api.moolre.com/open/transact/data?country=gha&data=banks",
-  );
+  let response: Response;
+  try {
+    response = await fetch(
+      "https://api.moolre.com/open/transact/data?country=gha&data=banks",
+    );
+  } catch (error) {
+    console.error("Moolre banks request failed:", error);
+    return [];
+  }
+
   const body = (await response.json().catch(() => null)) as {
     status?: string | number;
     data?: MoolreBank[];

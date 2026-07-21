@@ -90,21 +90,27 @@ export async function createCryptoPayment(
 
   const priceAmountUsd = Number((amountGhs / quote.ghsPerUsd).toFixed(2));
 
-  const response = await fetch(`${API_BASE}/payment`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-    },
-    body: JSON.stringify({
-      price_amount: priceAmountUsd,
-      price_currency: "usd",
-      pay_currency: "usdttrc20",
-      order_id: `${userId}-${Date.now()}`,
-      order_description: "AfriHome wallet top-up",
-      ipn_callback_url: callbackUrl,
-    }),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/payment`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+      },
+      body: JSON.stringify({
+        price_amount: priceAmountUsd,
+        price_currency: "usd",
+        pay_currency: "usdttrc20",
+        order_id: `${userId}-${Date.now()}`,
+        order_description: "AfriHome wallet top-up",
+        ipn_callback_url: callbackUrl,
+      }),
+    });
+  } catch (error) {
+    console.error("NOWPayments create-payment request failed:", error);
+    return { ok: false, error: "Crypto payment service is temporarily unavailable" };
+  }
 
   const body = (await response.json().catch(() => null)) as {
     payment_id?: number | string;

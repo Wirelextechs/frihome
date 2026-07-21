@@ -15,6 +15,14 @@ import { adminRouter } from "./routes/admin.js";
 import { referralsRouter } from "./routes/referrals.js";
 import { runDailyRoiAccrual } from "./lib/roiAccrual.js";
 
+// An unhandled rejection anywhere in the app (e.g. a payment provider's API
+// timing out) crashes the whole Node process by default since Node 15 —
+// taking down every route for every user, not just the one that failed.
+// Log it instead so a single flaky external call can't kill the server.
+process.on("unhandledRejection", (reason) => {
+  console.error("Unhandled promise rejection:", reason);
+});
+
 const app = express();
 const port = process.env.PORT ?? 3001;
 
