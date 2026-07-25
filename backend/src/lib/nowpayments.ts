@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { getGhsPerUsd } from "./fx.js";
 
 const API_BASE = "https://api.nowpayments.io/v1";
-const MIN_AMOUNT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const MIN_AMOUNT_CACHE_TTL_MS = 60 * 1000; // 1 minute — matches how often the frontend polls
 
 // Flat USD-equivalent floor for crypto withdrawals — on-chain network fees
 // make very small payouts impractical, unlike deposits (whose minimum

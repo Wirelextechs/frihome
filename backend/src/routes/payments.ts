@@ -9,6 +9,7 @@ import {
   walletTransactions,
 } from "../db/schema.js";
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
+import { getPaymentRules } from "../lib/paymentSettings.js";
 import {
   createCryptoPayment,
   getCryptoDepositQuote,
@@ -107,6 +108,20 @@ paymentsRouter.post(
       return res.status(400).json({ error: "Amount must be greater than zero" });
     }
 
+    const rules = await getPaymentRules();
+    if (rules.cryptoMinDepositGhs !== null && amountGhs < rules.cryptoMinDepositGhs) {
+      return res.status(400).json({
+        error: `Minimum deposit is GHS ${rules.cryptoMinDepositGhs.toFixed(2)}`,
+      });
+    }
+    if (rules.cryptoMaxDepositGhs !== null && amountGhs > rules.cryptoMaxDepositGhs) {
+      return res.status(400).json({
+        error: `Maximum deposit is GHS ${rules.cryptoMaxDepositGhs.toFixed(2)}`,
+      });
+    }
+
+    // Crypto deposits are fee-free — the full requested amount is both what
+    // the user pays and what gets credited (stored in amountGhs).
     const result = await createCryptoPayment(userId, amountGhs);
     if (!result.ok) {
       return res.status(400).json({ error: result.error });
@@ -167,6 +182,8 @@ paymentsRouter.post("/crypto/ipn", async (req, res) => {
     .where(eq(cryptoPayments.id, record.id));
 
   if (payment_status === "finished" && !alreadyCredited && record.amountGhs) {
+    // The deposit fee was already charged on top at invoice time, so the
+    // stored amountGhs is exactly what the user gets credited.
     const amount = Number(record.amountGhs);
 
     const [inserted] = await db

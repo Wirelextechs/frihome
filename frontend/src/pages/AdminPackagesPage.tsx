@@ -3,33 +3,21 @@ import { useNavigate } from "react-router-dom";
 import { ArrowLeft, Plus, X, Search } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
-import { ProjectForm, type ProjectFormValues } from "../components/ProjectForm";
+import { PackageForm, type PackageFormValues } from "../components/PackageForm";
 import { Pagination } from "../components/ui/pagination";
 
-interface Project {
+interface Package {
   id: string;
   title: string;
-  location: string;
-  raisedAmountGhs: string;
-  targetAmountGhs: string;
-  fundingStatus: "open" | "target_reached" | "stopped";
+  minInvestmentGhs: string;
+  expectedReturnPct: string;
+  durationDays: string;
+  isActive: boolean;
 }
 
-const STATUS_LABEL: Record<Project["fundingStatus"], string> = {
-  open: "Open",
-  target_reached: "Target reached",
-  stopped: "Stopped",
-};
-
-const STATUS_COLOR: Record<Project["fundingStatus"], string> = {
-  open: "bg-green-50 text-green-700",
-  target_reached: "bg-blue-50 text-blue-700",
-  stopped: "bg-red-50 text-red-700",
-};
-
-export function AdminProjectsPage() {
+export function AdminPackagesPage() {
   const navigate = useNavigate();
-  const [projects, setProjects] = useState<Project[]>([]);
+  const [packages, setPackages] = useState<Package[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -39,7 +27,7 @@ export function AdminProjectsPage() {
   const [total, setTotal] = useState(0);
   const limit = 50;
 
-  const fetchProjects = async (p = 1) => {
+  const fetchPackages = async (p = 1) => {
     try {
       setLoading(true);
       const params = new URLSearchParams({
@@ -47,36 +35,42 @@ export function AdminProjectsPage() {
         active: activeFilter,
         ...(search && { search }),
       });
-      const res = await api.get(`/api/admin/projects?${params}`);
-      setProjects(res.data.data || []);
+      const res = await api.get(`/api/admin/packages?${params}`);
+      setPackages(res.data.data || []);
       setTotal(res.data.total || 0);
       setPage(p);
     } catch (error) {
       console.error("Error:", error);
-      toast.error("Failed to load projects");
+      toast.error("Failed to load packages");
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchProjects(1);
+    fetchPackages(1);
   }, [search, activeFilter]);
 
-  async function handleCreate(values: ProjectFormValues) {
+  async function handleCreate(values: PackageFormValues) {
     try {
       setSubmitting(true);
-      await api.post("/api/admin/projects", {
-        ...values,
-        imageUrl: values.imageUrl || undefined,
-        maxInvestmentGhs: values.maxInvestmentGhs || undefined,
+      await api.post("/api/admin/packages", {
+        title: values.title,
+        minInvestmentGhs: values.minInvestmentGhs,
+        expectedReturnPct: values.expectedReturnPct,
+        durationDays: values.durationDays,
       });
-      toast.success("Project created");
+      toast.success("Package created");
       setShowForm(false);
-      fetchProjects(1);
+      fetchPackages(1);
     } catch (error: any) {
       console.error("Error:", error);
-      toast.error(error.response?.data?.error?.formErrors?.[0] ?? "Failed to create project");
+      const flat = error.response?.data?.error;
+      const msg =
+        flat?.formErrors?.[0] ??
+        (flat?.fieldErrors && Object.values(flat.fieldErrors).flat()[0]) ??
+        "Failed to create package";
+      toast.error(msg as string);
     } finally {
       setSubmitting(false);
     }
@@ -94,20 +88,20 @@ export function AdminProjectsPage() {
         </button>
 
         <div className="mb-6 flex items-center justify-between">
-          <h1 className="text-3xl font-bold">Projects</h1>
+          <h1 className="text-3xl font-bold">Packages</h1>
           <button
             onClick={() => setShowForm((v) => !v)}
             className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 font-medium text-primary-foreground hover:shadow-soft"
           >
             {showForm ? <X size={18} /> : <Plus size={18} />}
-            {showForm ? "Cancel" : "New Project"}
+            {showForm ? "Cancel" : "New Package"}
           </button>
         </div>
 
         {showForm && (
           <div className="mb-6">
-            <ProjectForm
-              submitLabel="Create Project"
+            <PackageForm
+              submitLabel="Create Package"
               submitting={submitting}
               onSubmit={handleCreate}
               onCancel={() => setShowForm(false)}
@@ -120,7 +114,7 @@ export function AdminProjectsPage() {
             <Search size={18} className="absolute left-3 top-3 text-ink-400" />
             <input
               type="text"
-              placeholder="Search by title or location..."
+              placeholder="Search by title..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-border bg-background"
@@ -156,55 +150,48 @@ export function AdminProjectsPage() {
               <div key={i} className="h-24 bg-ink-100 rounded-lg animate-pulse" />
             ))}
           </div>
-        ) : projects.length === 0 ? (
+        ) : packages.length === 0 ? (
           <div className="rounded-lg border border-border bg-card p-12 text-center">
-            <p className="text-ink-600">No projects yet.</p>
+            <p className="text-ink-600">No packages yet.</p>
           </div>
         ) : (
           <div className="grid gap-4">
-            {projects.map((p) => (
+            {packages.map((p) => (
               <button
                 key={p.id}
-                onClick={() => navigate(`/admin/projects/${p.id}`)}
+                onClick={() => navigate(`/admin/packages/${p.id}`)}
                 className="text-left rounded-lg border border-border bg-card p-4 transition hover:border-primary/50 hover:shadow-soft"
               >
                 <div className="flex items-center justify-between gap-2">
                   <h3 className="font-bold text-ink-900">{p.title}</h3>
                   <span
-                    className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS_COLOR[p.fundingStatus]}`}
+                    className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${
+                      p.isActive
+                        ? "bg-green-50 text-green-700"
+                        : "bg-ink-100 text-ink-500"
+                    }`}
                   >
-                    {STATUS_LABEL[p.fundingStatus]}
+                    {p.isActive ? "Active" : "Inactive"}
                   </span>
                 </div>
-                <p className="text-sm text-ink-600 mt-1">{p.location}</p>
-                <div className="mt-3 flex justify-between text-sm">
-                  <span>
-                    Raised: ₵
-                    {parseFloat(p.raisedAmountGhs || "0").toLocaleString()} / ₵
-                    {parseFloat(p.targetAmountGhs || "0").toLocaleString()}
-                  </span>
-                  <span>
-                    {Math.round(
-                      ((parseFloat(p.raisedAmountGhs || "0") /
-                        parseFloat(p.targetAmountGhs || "1")) *
-                        100) || 0,
-                    )}
-                    %
-                  </span>
+                <div className="mt-3 flex gap-6 text-sm text-ink-600">
+                  <span>₵{parseFloat(p.minInvestmentGhs || "0").toLocaleString()}</span>
+                  <span>{Number(p.expectedReturnPct)}% ROI</span>
+                  <span>{Number(p.durationDays)} days</span>
                 </div>
               </button>
             ))}
           </div>
         )}
 
-        {!loading && projects.length > 0 && (
+        {!loading && packages.length > 0 && (
           <Pagination
             page={page}
             limit={limit}
             total={total}
-            itemCount={projects.length}
-            onPageChange={fetchProjects}
-            itemLabel="projects"
+            itemCount={packages.length}
+            onPageChange={fetchPackages}
+            itemLabel="packages"
           />
         )}
       </div>

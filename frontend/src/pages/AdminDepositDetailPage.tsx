@@ -3,21 +3,28 @@ import { useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Check, X } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
+import { AdminUserDetailModal } from "../components/AdminUserDetailModal";
 
 interface DepositDetail {
   id: string;
+  method: "momo" | "binance_pay";
   reference: string;
   amountGhs: string;
-  network: string;
+  network: string | null;
   senderName: string;
-  senderNumber: string;
+  senderNumber: string | null;
+  senderBinanceId: string | null;
+  senderEmail: string | null;
   screenshotUrl: string;
   status: "pending" | "approved" | "rejected";
   rejectionReason: string | null;
   createdAt: string;
+  depositFeePct: number;
+  expectedPaymentGhs: number;
+  binanceAccount: { binanceId: string; label: string } | null;
   user: {
     id: string;
-    email: string;
+    phone: string;
     fullName: string;
     country: string;
     kycStatus: string;
@@ -38,6 +45,7 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
 export function AdminDepositDetailPage() {
   const { depositId } = useParams();
   const navigate = useNavigate();
+  const [viewUserId, setViewUserId] = useState<string | null>(null);
   const [deposit, setDeposit] = useState<DepositDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
@@ -121,7 +129,9 @@ export function AdminDepositDetailPage() {
 
         <div className="mb-6 flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-ink-900">Mobile Money Deposit</h1>
+            <h1 className="text-2xl font-bold text-ink-900">
+              {deposit.method === "binance_pay" ? "Binance Pay Deposit" : "Mobile Money Deposit"}
+            </h1>
             <p className="text-sm text-ink-500 font-mono">{deposit.reference}</p>
           </div>
           {deposit.status === "pending" && (
@@ -162,11 +172,11 @@ export function AdminDepositDetailPage() {
           {deposit.user ? (
             <>
               <Row label="Name" value={deposit.user.fullName} />
-              <Row label="Email" value={deposit.user.email} />
+              <Row label="Phone" value={deposit.user.phone} />
               <Row label="Country" value={deposit.user.country} />
               <Row label="KYC Status" value={deposit.user.kycStatus} />
               <button
-                onClick={() => navigate(`/admin/users/${deposit.user!.id}`)}
+                onClick={() => setViewUserId(deposit.user!.id)}
                 className="mt-3 text-sm font-medium text-primary hover:underline"
               >
                 View full user profile →
@@ -181,11 +191,39 @@ export function AdminDepositDetailPage() {
           <h2 className="text-sm font-bold text-ink-700 uppercase mb-2">
             Payment Details
           </h2>
-          <Row label="Amount" value={`₵${parseFloat(deposit.amountGhs).toFixed(2)}`} />
+          <Row label="Amount to credit" value={`₵${parseFloat(deposit.amountGhs).toFixed(2)}`} />
+          {deposit.depositFeePct > 0 && (
+            <div className="flex items-center justify-between py-2.5 border-b border-border/50 last:border-0">
+              <span className="text-sm font-medium text-amber-700">
+                Expected payment (incl. {deposit.depositFeePct}% fee)
+              </span>
+              <span className="text-sm font-bold text-amber-700 text-right">
+                ₵{deposit.expectedPaymentGhs.toFixed(2)}
+              </span>
+            </div>
+          )}
           <Row label="Reference" value={deposit.reference} />
-          <Row label="Network paid from" value={deposit.network.toUpperCase()} />
-          <Row label="Sender name" value={deposit.senderName} />
-          <Row label="Sender number" value={deposit.senderNumber} />
+          {deposit.method === "binance_pay" ? (
+            <>
+              <Row
+                label="Paid to"
+                value={
+                  deposit.binanceAccount
+                    ? `${deposit.binanceAccount.label} (${deposit.binanceAccount.binanceId})`
+                    : "—"
+                }
+              />
+              <Row label="Sender Binance ID" value={deposit.senderBinanceId} />
+              <Row label="Sender email" value={deposit.senderEmail} />
+              <Row label="Sender nickname" value={deposit.senderName} />
+            </>
+          ) : (
+            <>
+              <Row label="Network paid from" value={deposit.network?.toUpperCase()} />
+              <Row label="Sender name" value={deposit.senderName} />
+              <Row label="Sender number" value={deposit.senderNumber} />
+            </>
+          )}
           <Row label="Submitted" value={new Date(deposit.createdAt).toLocaleString()} />
           {deposit.status === "rejected" && deposit.rejectionReason && (
             <Row label="Rejection reason" value={deposit.rejectionReason} />
@@ -205,6 +243,13 @@ export function AdminDepositDetailPage() {
           </a>
         </div>
       </div>
+
+      {viewUserId && (
+        <AdminUserDetailModal
+          userId={viewUserId}
+          onClose={() => setViewUserId(null)}
+        />
+      )}
     </div>
   );
 }

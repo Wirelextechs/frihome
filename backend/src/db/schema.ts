@@ -9,6 +9,9 @@ import {
   jsonb,
   pgEnum,
   smallint,
+  integer,
+  uniqueIndex,
+  index,
 } from "drizzle-orm/pg-core";
 
 export const kycStatusEnum = pgEnum("kyc_status", [
@@ -30,6 +33,7 @@ export const payoutStatusEnum = pgEnum("payout_status", [
   "scheduled",
   "paid",
   "failed",
+  "forfeited",
 ]);
 
 export const paymentProviderEnum = pgEnum("payment_provider", [
@@ -45,6 +49,8 @@ export const walletTxTypeEnum = pgEnum("wallet_tx_type", [
   "refund",
   "referral_reward",
   "reward_claim",
+  "adjustment_credit",
+  "adjustment_debit",
 ]);
 
 export const walletTxStatusEnum = pgEnum("wallet_tx_status", [
@@ -76,6 +82,11 @@ export const manualDepositStatusEnum = pgEnum("manual_deposit_status", [
   "rejected",
 ]);
 
+export const manualDepositMethodEnum = pgEnum("manual_deposit_method", [
+  "momo",
+  "binance_pay",
+]);
+
 export const rewardTypeEnum = pgEnum("reward_type", [
   "fixed",
   "random_range",
@@ -96,7 +107,7 @@ export const rewardClaimResultEnum = pgEnum("reward_claim_result", [
 
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
-  email: varchar("email", { length: 255 }).notNull().unique(),
+  phone: varchar("phone", { length: 20 }).notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   fullName: varchar("full_name", { length: 255 }).notNull(),
   country: varchar("country", { length: 2 }).notNull(),
@@ -151,7 +162,7 @@ export const projects = pgTable("projects", {
     precision: 5,
     scale: 2,
   }).notNull(),
-  durationMonths: numeric("duration_months", { precision: 4, scale: 0 }).notNull(),
+  durationDays: numeric("duration_days", { precision: 6, scale: 0 }).notNull(),
   imageUrl: text("image_url"),
   isActive: boolean("is_active").notNull().default(true),
   fundingStatus: fundingStatusEnum("funding_status").notNull().default("open"),
@@ -351,7 +362,14 @@ export const referralRewards = pgTable("referral_rewards", {
   }).notNull(),
   status: referralRewardStatusEnum("status").notNull().default("credited"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (t) => ({
+  // One reward per investment per referral level — required by the
+  // onConflictDoNothing target in creditReferralRewards.
+  investmentLevelUnique: uniqueIndex("referral_rewards_investment_level_unique").on(
+    t.investmentId,
+    t.level,
+  ),
+}));
 
 export const referralConfig = pgTable("referral_config", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -380,16 +398,55 @@ export const depositSettings = pgTable("deposit_settings", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// Which deposit/top-up methods are visible to users; admin-controlled.
+export const depositMethodSettings = pgTable("deposit_method_settings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  momoEnabled: boolean("momo_enabled").notNull().default(true),
+  cryptoEnabled: boolean("crypto_enabled").notNull().default(true),
+  chatEnabled: boolean("chat_enabled").notNull().default(true),
+  binancePayEnabled: boolean("binance_pay_enabled").notNull().default(true),
+  updatedBy: uuid("updated_by").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// Each admin registers at most one personal Binance Pay ID (enforced by the
+// unique adminId below); investors pick one from the active list to pay into.
+export const binancePayAccounts = pgTable("binance_pay_accounts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  adminId: uuid("admin_id")
+    .notNull()
+    .unique()
+    .references(() => users.id, { onDelete: "cascade" }),
+  binanceId: varchar("binance_id", { length: 64 }).notNull(),
+  label: varchar("label", { length: 100 }).notNull(),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 export const manualDeposits = pgTable("manual_deposits", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id")
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
+  method: manualDepositMethodEnum("method").notNull().default("momo"),
   reference: varchar("reference", { length: 20 }).notNull().unique(),
   amountGhs: numeric("amount_ghs", { precision: 14, scale: 2 }).notNull(),
-  network: varchar("network", { length: 30 }).notNull(),
+  // Momo-specific; null for binance_pay deposits.
+  network: varchar("network", { length: 30 }),
+  senderNumber: varchar("sender_number", { length: 30 }),
+  // Shared "who sent this" label: momo sender name, or the investor's
+  // Binance nickname.
   senderName: varchar("sender_name", { length: 255 }).notNull(),
-  senderNumber: varchar("sender_number", { length: 30 }).notNull(),
+  // Binance Pay-specific; null for momo deposits.
+  binanceAccountId: uuid("binance_account_id").references(
+    () => binancePayAccounts.id,
+    { onDelete: "set null" },
+  ),
+  senderBinanceId: varchar("sender_binance_id", { length: 64 }),
+  senderEmail: varchar("sender_email", { length: 255 }),
   screenshotUrl: text("screenshot_url").notNull(),
   status: manualDepositStatusEnum("status").notNull().default("pending"),
   rejectionReason: text("rejection_reason"),
@@ -467,4 +524,111 @@ export const confirmationTokens = pgTable("confirmation_tokens", {
   }),
   confirmedAt: timestamp("confirmed_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const announcements = pgTable("announcements", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  title: varchar("title", { length: 200 }).notNull(),
+  body: text("body").notNull(),
+  isActive: boolean("is_active").notNull().default(false),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const chatSenderRoleEnum = pgEnum("chat_sender_role", [
+  "user",
+  "admin",
+  "system",
+]);
+
+export const chatMessages = pgTable(
+  "chat_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // Thread owner: always the investor's userId, even for admin/system messages
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // Actual author (admin's id for admin messages; null for system messages)
+    senderId: uuid("sender_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    senderRole: chatSenderRoleEnum("sender_role").notNull(),
+    body: text("body"),
+    imageUrl: text("image_url"),
+    // When set, the message renders as a top-up request card
+    manualDepositId: uuid("manual_deposit_id").references(
+      () => manualDeposits.id,
+      { onDelete: "set null" },
+    ),
+    readByUser: boolean("read_by_user").notNull().default(false),
+    readByAdmin: boolean("read_by_admin").notNull().default(false),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    editedAt: timestamp("edited_at"),
+    editedByAdminName: text("edited_by_admin_name"),
+  },
+  (t) => ({
+    userCreatedIdx: index("chat_messages_user_created_idx").on(
+      t.userId,
+      t.createdAt,
+    ),
+  }),
+);
+
+// One row per investor thread. Presence of a row means an admin has claimed
+// the thread; deleted on release or replaced on takeover. No expiry — locks
+// only clear via explicit release or another admin taking over, so a thread
+// is never in limbo waiting on a timer.
+export const chatThreadLocks = pgTable("chat_thread_locks", {
+  threadUserId: uuid("thread_user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  adminId: uuid("admin_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  adminName: text("admin_name").notNull(),
+  lockedAt: timestamp("locked_at").notNull().defaultNow(),
+});
+
+export const supportSettings = pgTable("support_settings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  whatsappChannelUrl: text("whatsapp_channel_url"),
+  telegramGroupUrl: text("telegram_group_url"),
+  telegramProfiles: jsonb("telegram_profiles")
+    .$type<{ label: string; url: string }[]>()
+    .notNull()
+    .default([]),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const paymentSettings = pgTable("payment_settings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  // Mobile money deposit limits/fee.
+  momoMinDepositGhs: numeric("min_deposit_ghs", { precision: 14, scale: 2 }),
+  momoMaxDepositGhs: numeric("max_deposit_ghs", { precision: 14, scale: 2 }),
+  momoDepositFeePct: numeric("deposit_fee_pct", { precision: 5, scale: 2 })
+    .notNull()
+    .default("0"),
+  // Crypto deposits are always fee-free; these are optional admin caps on top
+  // of the live NOWPayments minimum (which fluctuates with the crypto market).
+  cryptoMinDepositGhs: numeric("crypto_min_deposit_ghs", { precision: 14, scale: 2 }),
+  cryptoMaxDepositGhs: numeric("crypto_max_deposit_ghs", { precision: 14, scale: 2 }),
+  // Binance Pay deposit limits/fee.
+  binanceMinDepositGhs: numeric("binance_min_deposit_ghs", { precision: 14, scale: 2 }),
+  binanceMaxDepositGhs: numeric("binance_max_deposit_ghs", { precision: 14, scale: 2 }),
+  binanceDepositFeePct: numeric("binance_deposit_fee_pct", { precision: 5, scale: 2 })
+    .notNull()
+    .default("0"),
+  minWithdrawalGhs: numeric("min_withdrawal_ghs", { precision: 14, scale: 2 }),
+  maxWithdrawalGhs: numeric("max_withdrawal_ghs", { precision: 14, scale: 2 }),
+  withdrawalFeePct: numeric("withdrawal_fee_pct", { precision: 5, scale: 2 })
+    .notNull()
+    .default("0"),
+  // Weekdays withdrawals are allowed (0=Sunday..6=Saturday); empty = every day.
+  withdrawalDays: jsonb("withdrawal_days").$type<number[]>().notNull().default([]),
+  // "HH:MM" 24h in GMT (Ghana time); both null = any time of day.
+  withdrawalStartTime: varchar("withdrawal_start_time", { length: 5 }),
+  withdrawalEndTime: varchar("withdrawal_end_time", { length: 5 }),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

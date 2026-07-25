@@ -1,6 +1,6 @@
 import { Router } from "express";
 import multer from "multer";
-import { eq, gte, and, desc, sql, or, ilike } from "drizzle-orm";
+import { eq, gt, gte, and, asc, desc, sql, or, ilike, inArray } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { db } from "../db/index.js";
@@ -20,10 +20,17 @@ import {
   referralConfig,
   referralRewards,
   depositSettings,
+  depositMethodSettings,
   manualDeposits,
   rewardPools,
   rewardClaims,
   rewardPoolAudit,
+  announcements,
+  supportSettings,
+  paymentSettings,
+  chatMessages,
+  chatThreadLocks,
+  binancePayAccounts,
 } from "../db/schema.js";
 import {
   requireAuth,
@@ -34,8 +41,10 @@ import {
   type AuthedRequest,
 } from "../middleware/auth.js";
 import { runDailyRoiAccrual } from "../lib/roiAccrual.js";
-import { uploadProjectImage } from "../lib/storage.js";
+import { uploadProjectImage, uploadPaymentScreenshot } from "../lib/storage.js";
 import { generateRewardPoolCode } from "../lib/rewardPoolCode.js";
+import { getPaymentRules } from "../lib/paymentSettings.js";
+import { publishChatEvent } from "../lib/realtime.js";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -57,7 +66,7 @@ adminRouter.use(requireAdmin);
 // Never leak passwordHash to the admin frontend
 const SAFE_USER_COLUMNS = {
   id: users.id,
-  email: users.email,
+  phone: users.phone,
   fullName: users.fullName,
   country: users.country,
   preferredCurrency: users.preferredCurrency,
@@ -87,7 +96,7 @@ async function logAdminAction(
 
 // ============ USERS ============
 
-adminRouter.get("/users", async (req: AuthedRequest, res) => {
+adminRouter.get("/users", requirePermission("users.manage"), async (req: AuthedRequest, res) => {
   try {
     const search = (req.query.search as string) || "";
     const kycStatus = (req.query.kycStatus as string) || "";
@@ -101,7 +110,7 @@ adminRouter.get("/users", async (req: AuthedRequest, res) => {
       const searchPattern = `%${search}%`;
       conditions.push(
         or(
-          ilike(users.email, searchPattern),
+          ilike(users.phone, searchPattern),
           ilike(users.fullName, searchPattern),
         ),
       );
@@ -130,7 +139,7 @@ adminRouter.get("/users", async (req: AuthedRequest, res) => {
   }
 });
 
-adminRouter.get("/users/:userId", async (req: AuthedRequest, res) => {
+adminRouter.get("/users/:userId", requirePermission("users.manage"), async (req: AuthedRequest, res) => {
   try {
     const { userId } = req.params;
     const [user] = await db
@@ -192,6 +201,26 @@ adminRouter.post("/users/:userId/suspend", requirePermission("users.manage"), as
     const { userId } = req.params;
     const { reason } = req.body;
 
+    if (userId === req.user!.userId) {
+      return res.status(400).json({ error: "You cannot suspend yourself" });
+    }
+
+    // Never let one admin suspend another admin (and lock out the platform);
+    // an admin must be demoted before they can be suspended.
+    const [target] = await db
+      .select({ role: users.role })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    if (!target) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    if (target.role === "admin") {
+      return res
+        .status(400)
+        .json({ error: "Demote this admin before suspending them" });
+    }
+
     await db
       .update(users)
       .set({ isSuspended: true })
@@ -230,6 +259,82 @@ adminRouter.post("/users/:userId/activate", requirePermission("users.manage"), a
   }
 });
 
+const walletAdjustmentSchema = z.object({
+  direction: z.enum(["credit", "debit"]),
+  amountGhs: z.coerce.number().positive(),
+  reason: z.string().trim().min(3).max(200),
+});
+
+adminRouter.post(
+  "/users/:userId/wallet-adjustment",
+  requirePermission("users.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const { userId } = req.params;
+      const parsed = walletAdjustmentSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.flatten() });
+      }
+      const { direction, amountGhs, reason } = parsed.data;
+
+      const [target] = await db.select().from(users).where(eq(users.id, userId));
+      if (!target) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      // Ensure a wallet row exists, then read the current balance.
+      const [inserted] = await db
+        .insert(wallets)
+        .values({ userId })
+        .onConflictDoNothing()
+        .returning();
+      const [wallet] =
+        inserted !== undefined
+          ? [inserted]
+          : await db.select().from(wallets).where(eq(wallets.userId, userId)).limit(1);
+
+      const balanceBefore = Number(wallet.balanceGhs);
+      const delta = direction === "credit" ? amountGhs : -amountGhs;
+      const balanceAfter = balanceBefore + delta;
+
+      if (balanceAfter < 0) {
+        return res.status(400).json({
+          error: `Insufficient balance. Available: ₵${balanceBefore.toFixed(2)}`,
+        });
+      }
+
+      await db
+        .update(wallets)
+        .set({ balanceGhs: balanceAfter.toFixed(2), updatedAt: new Date() })
+        .where(eq(wallets.userId, userId));
+
+      await db.insert(walletTransactions).values({
+        userId,
+        type: direction === "credit" ? "adjustment_credit" : "adjustment_debit",
+        amountGhs: amountGhs.toFixed(2),
+        balanceBeforeGhs: balanceBefore.toFixed(2),
+        balanceAfterGhs: balanceAfter.toFixed(2),
+        status: "completed",
+        method: "adjustment",
+        description: `Admin ${direction} — ${reason}`,
+      });
+
+      await logAdminAction(
+        req.user!.userId,
+        direction === "credit" ? "WALLET_CREDIT" : "WALLET_DEBIT",
+        "wallets",
+        userId,
+        { amountGhs, reason, balanceBefore, balanceAfter },
+      );
+
+      res.json({ success: true, balanceBefore, balanceAfter });
+    } catch (error) {
+      console.error("Error adjusting wallet:", error);
+      res.status(500).json({ error: "Failed to adjust wallet" });
+    }
+  },
+);
+
 adminRouter.get("/permissions/scopes", requirePermission("admins.manage"), async (_req, res) => {
   res.json({ scopes: ADMIN_SCOPES });
 });
@@ -250,6 +355,12 @@ adminRouter.post(
         return res.status(400).json({ error: parsed.error.flatten() });
       }
       const { level, permissions } = parsed.data;
+
+      if (userId === req.user!.userId) {
+        return res.status(400).json({
+          error: "You cannot change your own admin access",
+        });
+      }
 
       const [target] = await db.select().from(users).where(eq(users.id, userId));
       if (!target) {
@@ -318,7 +429,7 @@ adminRouter.post(
 
 // ============ KYC ============
 
-adminRouter.get("/kyc/pending", async (req: AuthedRequest, res) => {
+adminRouter.get("/kyc/pending", requirePermission("kyc.manage"), async (req: AuthedRequest, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
     const limit = 50;
@@ -435,7 +546,7 @@ adminRouter.get("/projects", async (req: AuthedRequest, res) => {
       .select()
       .from(projects)
       .where(whereClause)
-      .orderBy(desc(projects.createdAt))
+      .orderBy(asc(projects.minInvestmentGhs))
       .limit(limit)
       .offset(offset);
 
@@ -470,21 +581,22 @@ adminRouter.get("/projects/:projectId", async (req: AuthedRequest, res) => {
   }
 });
 
+// Empty strings arrive from optional form fields the UI no longer shows;
+// treat them as absent instead of failing number coercion.
+const emptyToUndefined = (v: unknown) => (v === "" || v == null ? undefined : v);
+const optionalPositiveNumber = z.preprocess(emptyToUndefined, z.coerce.number().positive().optional());
+
 const projectFieldsSchema = z.object({
   title: z.string().min(3),
-  description: z.string().min(10),
-  location: z.string().min(2),
-  targetAmountGhs: z.coerce.number().positive(),
+  description: z.string().optional().default(""),
+  location: z.string().optional().default(""),
+  targetAmountGhs: optionalPositiveNumber,
   minInvestmentGhs: z.coerce.number().positive(),
-  maxInvestmentGhs: z.coerce.number().positive().optional().nullable(),
+  maxInvestmentGhs: optionalPositiveNumber,
   expectedReturnPct: z.coerce.number().positive(),
-  durationMonths: z.coerce.number().int().positive(),
-  imageUrl: z.string().url().optional().nullable(),
-}).refine(
-  (data) =>
-    data.maxInvestmentGhs == null || data.maxInvestmentGhs >= data.minInvestmentGhs,
-  { message: "Maximum investment must be greater than or equal to minimum investment", path: ["maxInvestmentGhs"] },
-);
+  durationDays: z.coerce.number().int().positive(),
+  imageUrl: z.preprocess(emptyToUndefined, z.string().url().optional()),
+});
 
 adminRouter.post("/projects", requirePermission("projects.manage"), async (req: AuthedRequest, res) => {
   try {
@@ -500,11 +612,11 @@ adminRouter.post("/projects", requirePermission("projects.manage"), async (req: 
         title: data.title,
         description: data.description,
         location: data.location,
-        targetAmountGhs: data.targetAmountGhs.toString(),
+        targetAmountGhs: (data.targetAmountGhs ?? data.minInvestmentGhs).toString(),
         minInvestmentGhs: data.minInvestmentGhs.toString(),
         maxInvestmentGhs: data.maxInvestmentGhs?.toString(),
         expectedReturnPct: data.expectedReturnPct.toString(),
-        durationMonths: data.durationMonths.toString(),
+        durationDays: data.durationDays.toString(),
         imageUrl: data.imageUrl,
       })
       .returning();
@@ -533,11 +645,11 @@ adminRouter.patch("/projects/:projectId", requirePermission("projects.manage"), 
         title: data.title,
         description: data.description,
         location: data.location,
-        targetAmountGhs: data.targetAmountGhs.toString(),
+        targetAmountGhs: (data.targetAmountGhs ?? data.minInvestmentGhs).toString(),
         minInvestmentGhs: data.minInvestmentGhs.toString(),
         maxInvestmentGhs: data.maxInvestmentGhs?.toString() ?? null,
         expectedReturnPct: data.expectedReturnPct.toString(),
-        durationMonths: data.durationMonths.toString(),
+        durationDays: data.durationDays.toString(),
         imageUrl: data.imageUrl ?? null,
         updatedAt: new Date(),
       })
@@ -622,9 +734,171 @@ adminRouter.post(
   },
 );
 
+// ============ PACKAGES (Alias for PROJECTS) ============
+// Routes for /packages use the same handlers as /projects for investment packages
+
+adminRouter.get("/packages", async (req: AuthedRequest, res) => {
+  try {
+    const isActive = req.query.active !== "false";
+    const search = (req.query.search as string) || "";
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const limit = 50;
+    const offset = (page - 1) * limit;
+
+    const conditions = [eq(projects.isActive, isActive)];
+    if (search) {
+      const searchPattern = `%${search}%`;
+      conditions.push(
+        or(ilike(projects.title, searchPattern), ilike(projects.location, searchPattern))!,
+      );
+    }
+    const whereClause = and(...conditions);
+
+    const data = await db
+      .select()
+      .from(projects)
+      .where(whereClause)
+      .orderBy(asc(projects.minInvestmentGhs))
+      .limit(limit)
+      .offset(offset);
+
+    const countResult = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(projects)
+      .where(whereClause);
+    const total = countResult[0]?.count || 0;
+
+    res.json({ data, total, page, limit });
+  } catch (error) {
+    console.error("Error fetching packages:", error);
+    res.status(500).json({ error: "Failed to fetch packages" });
+  }
+});
+
+adminRouter.get("/packages/:packageId", async (req: AuthedRequest, res) => {
+  try {
+    const [package_] = await db
+      .select()
+      .from(projects)
+      .where(eq(projects.id, req.params.packageId));
+
+    if (!package_) {
+      return res.status(404).json({ error: "Package not found" });
+    }
+
+    res.json({ data: package_ });
+  } catch (error) {
+    console.error("Error fetching package:", error);
+    res.status(500).json({ error: "Failed to fetch package" });
+  }
+});
+
+adminRouter.post("/packages", requirePermission("projects.manage"), async (req: AuthedRequest, res) => {
+  try {
+    const parsed = projectFieldsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.flatten() });
+    }
+
+    const { data } = parsed;
+    const [package_] = await db
+      .insert(projects)
+      .values({
+        title: data.title,
+        description: data.description,
+        location: data.location,
+        targetAmountGhs: (data.targetAmountGhs ?? data.minInvestmentGhs).toString(),
+        minInvestmentGhs: data.minInvestmentGhs.toString(),
+        maxInvestmentGhs: data.maxInvestmentGhs?.toString(),
+        expectedReturnPct: data.expectedReturnPct.toString(),
+        durationDays: data.durationDays.toString(),
+        imageUrl: data.imageUrl,
+      })
+      .returning();
+
+    await logAdminAction(req.user!.userId, "CREATE_PACKAGE", "packages", package_.id);
+
+    res.json(package_);
+  } catch (error: any) {
+    console.error("Error creating package:", error);
+    res.status(500).json({ error: error.message || "Failed to create package" });
+  }
+});
+
+adminRouter.patch("/packages/:packageId", requirePermission("projects.manage"), async (req: AuthedRequest, res) => {
+  try {
+    const parsed = projectFieldsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.flatten() });
+    }
+
+    const { data } = parsed;
+    const [package_] = await db
+      .update(projects)
+      .set({
+        title: data.title,
+        description: data.description,
+        location: data.location,
+        targetAmountGhs: (data.targetAmountGhs ?? data.minInvestmentGhs).toString(),
+        minInvestmentGhs: data.minInvestmentGhs.toString(),
+        maxInvestmentGhs: data.maxInvestmentGhs?.toString(),
+        expectedReturnPct: data.expectedReturnPct.toString(),
+        durationDays: data.durationDays.toString(),
+        imageUrl: data.imageUrl,
+        updatedAt: new Date(),
+      })
+      .where(eq(projects.id, req.params.packageId))
+      .returning();
+
+    if (!package_) {
+      return res.status(404).json({ error: "Package not found" });
+    }
+
+    await logAdminAction(req.user!.userId, "UPDATE_PACKAGE", "packages", package_.id);
+
+    res.json(package_);
+  } catch (error: any) {
+    console.error("Error updating package:", error);
+    res.status(500).json({ error: error.message || "Failed to update package" });
+  }
+});
+
+const packageActiveSchema = z.object({ isActive: z.boolean() });
+
+adminRouter.post("/packages/:packageId/active", requirePermission("projects.manage"), async (req: AuthedRequest, res) => {
+  try {
+    const parsed = packageActiveSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.flatten() });
+    }
+
+    const [package_] = await db
+      .update(projects)
+      .set({ isActive: parsed.data.isActive, updatedAt: new Date() })
+      .where(eq(projects.id, req.params.packageId))
+      .returning();
+
+    if (!package_) {
+      return res.status(404).json({ error: "Package not found" });
+    }
+
+    await logAdminAction(
+      req.user!.userId,
+      parsed.data.isActive ? "ACTIVATE_PACKAGE" : "DEACTIVATE_PACKAGE",
+      "packages",
+      package_.id,
+    );
+
+    res.json(package_);
+  } catch (error: any) {
+    console.error("Error updating package status:", error);
+    res.status(500).json({ error: error.message || "Failed to update package status" });
+  }
+});
+
 // ============ FINANCIALS ============
 
-adminRouter.get("/financials/dashboard", async (req: AuthedRequest, res) => {
+adminRouter.get("/financials/dashboard", requirePermission("payments.manage"), async (req: AuthedRequest, res) => {
   try {
     const investedResult = await db
       .select({
@@ -681,7 +955,7 @@ adminRouter.get("/financials/dashboard", async (req: AuthedRequest, res) => {
 
 // ============ PAYMENTS & CRYPTO ============
 
-adminRouter.get("/payments/crypto", async (req: AuthedRequest, res) => {
+adminRouter.get("/payments/crypto", requirePermission("payments.manage"), async (req: AuthedRequest, res) => {
   try {
     const status = (req.query.status as string) || "";
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
@@ -710,7 +984,7 @@ adminRouter.get("/payments/crypto", async (req: AuthedRequest, res) => {
   }
 });
 
-adminRouter.get("/payments/crypto/:paymentId", async (req: AuthedRequest, res) => {
+adminRouter.get("/payments/crypto/:paymentId", requirePermission("payments.manage"), async (req: AuthedRequest, res) => {
   try {
     const [payment] = await db
       .select()
@@ -750,7 +1024,7 @@ adminRouter.get("/payments/crypto/:paymentId", async (req: AuthedRequest, res) =
 
 // ============ WITHDRAWALS ============
 
-adminRouter.get("/withdrawals/pending", async (req: AuthedRequest, res) => {
+adminRouter.get("/withdrawals/pending", requirePermission("withdrawals.manage"), async (req: AuthedRequest, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
     const limit = 50;
@@ -801,7 +1075,7 @@ adminRouter.get("/withdrawals/pending", async (req: AuthedRequest, res) => {
   }
 });
 
-adminRouter.get("/withdrawals/:txnId", async (req: AuthedRequest, res) => {
+adminRouter.get("/withdrawals/:txnId", requirePermission("withdrawals.manage"), async (req: AuthedRequest, res) => {
   try {
     const [txn] = await db
       .select()
@@ -918,7 +1192,7 @@ adminRouter.post("/run-daily-roi", async (req: AuthedRequest, res) => {
   }
 });
 
-adminRouter.get("/audit-logs", async (req: AuthedRequest, res) => {
+adminRouter.get("/audit-logs", requirePermission("admins.manage"), async (req: AuthedRequest, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
     const limit = 50;
@@ -948,12 +1222,12 @@ adminRouter.get("/audit-logs", async (req: AuthedRequest, res) => {
 function computeDailyAmount(
   amountGhs: string,
   expectedReturnPct: string,
-  durationMonths: string,
+  durationDays: string,
 ): number {
-  const durationDays = Number(durationMonths) * 30;
-  if (durationDays <= 0) return 0;
+  const days = Number(durationDays);
+  if (days <= 0) return 0;
   const totalReturn = Number(amountGhs) * (Number(expectedReturnPct) / 100);
-  return Math.round((totalReturn / durationDays) * 100) / 100;
+  return Math.round((totalReturn / days) * 100) / 100;
 }
 
 function daysElapsedSince(createdAt: Date, capDays: number): number {
@@ -965,7 +1239,7 @@ function daysElapsedSince(createdAt: Date, capDays: number): number {
   return Math.max(0, Math.min(days, capDays));
 }
 
-adminRouter.get("/roi/investments", async (req: AuthedRequest, res) => {
+adminRouter.get("/roi/investments", requirePermission("roi.manage"), async (req: AuthedRequest, res) => {
   try {
     const search = (req.query.search as string) || "";
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
@@ -977,7 +1251,7 @@ adminRouter.get("/roi/investments", async (req: AuthedRequest, res) => {
       const searchPattern = `%${search}%`;
       conditions.push(
         or(
-          ilike(users.email, searchPattern),
+          ilike(users.phone, searchPattern),
           ilike(users.fullName, searchPattern),
           ilike(projects.title, searchPattern),
         )!,
@@ -995,9 +1269,9 @@ adminRouter.get("/roi/investments", async (req: AuthedRequest, res) => {
         projectId: projects.id,
         projectTitle: projects.title,
         expectedReturnPct: projects.expectedReturnPct,
-        durationMonths: projects.durationMonths,
+        durationDays: projects.durationDays,
         userFullName: users.fullName,
-        userEmail: users.email,
+        userPhone: users.phone,
       })
       .from(investments)
       .innerJoin(projects, eq(projects.id, investments.projectId))
@@ -1009,11 +1283,11 @@ adminRouter.get("/roi/investments", async (req: AuthedRequest, res) => {
 
     const data = await Promise.all(
       rows.map(async (inv) => {
-        const durationDays = Number(inv.durationMonths) * 30;
+        const durationDays = Number(inv.durationDays);
         const dailyAmount = computeDailyAmount(
           inv.amountGhs,
           inv.expectedReturnPct,
-          inv.durationMonths,
+          inv.durationDays,
         );
         const daysElapsed = daysElapsedSince(inv.createdAt, durationDays);
         const expectedPaid = Math.round(dailyAmount * daysElapsed * 100) / 100;
@@ -1051,7 +1325,7 @@ adminRouter.get("/roi/investments", async (req: AuthedRequest, res) => {
   }
 });
 
-adminRouter.get("/roi/investments/:investmentId", async (req: AuthedRequest, res) => {
+adminRouter.get("/roi/investments/:investmentId", requirePermission("roi.manage"), async (req: AuthedRequest, res) => {
   try {
     const { investmentId } = req.params;
 
@@ -1065,7 +1339,7 @@ adminRouter.get("/roi/investments/:investmentId", async (req: AuthedRequest, res
         projectId: projects.id,
         projectTitle: projects.title,
         expectedReturnPct: projects.expectedReturnPct,
-        durationMonths: projects.durationMonths,
+        durationDays: projects.durationDays,
       })
       .from(investments)
       .innerJoin(projects, eq(projects.id, investments.projectId))
@@ -1086,11 +1360,11 @@ adminRouter.get("/roi/investments/:investmentId", async (req: AuthedRequest, res
       .where(eq(payouts.investmentId, investmentId))
       .orderBy(desc(payouts.createdAt));
 
-    const durationDays = Number(inv.durationMonths) * 30;
+    const durationDays = Number(inv.durationDays);
     const dailyAmount = computeDailyAmount(
       inv.amountGhs,
       inv.expectedReturnPct,
-      inv.durationMonths,
+      inv.durationDays,
     );
     const daysElapsed = daysElapsedSince(inv.createdAt, durationDays);
     const expectedPaid = Math.round(dailyAmount * daysElapsed * 100) / 100;
@@ -1213,7 +1487,7 @@ adminRouter.post(
 
 // ============ REFERRAL PROGRAM ============
 
-adminRouter.get("/referral-config", async (_req: AuthedRequest, res) => {
+adminRouter.get("/referral-config", requirePermission("referrals.manage"), async (_req: AuthedRequest, res) => {
   try {
     const rows = await db
       .select({
@@ -1221,7 +1495,7 @@ adminRouter.get("/referral-config", async (_req: AuthedRequest, res) => {
         rewardPercentage: referralConfig.rewardPercentage,
         isActive: referralConfig.isActive,
         updatedAt: referralConfig.updatedAt,
-        updatedByEmail: users.email,
+        updatedByPhone: users.phone,
       })
       .from(referralConfig)
       .leftJoin(users, eq(users.id, referralConfig.updatedBy))
@@ -1286,7 +1560,7 @@ adminRouter.post(
   },
 );
 
-adminRouter.get("/referral-rewards", async (req: AuthedRequest, res) => {
+adminRouter.get("/referral-rewards", requirePermission("referrals.manage"), async (req: AuthedRequest, res) => {
   try {
     const search = (req.query.search as string) || "";
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
@@ -1298,8 +1572,8 @@ adminRouter.get("/referral-rewards", async (req: AuthedRequest, res) => {
 
     const whereClause = search
       ? or(
-          ilike(referrerUsers.email, `%${search}%`),
-          ilike(refereeUsers.email, `%${search}%`),
+          ilike(referrerUsers.phone, `%${search}%`),
+          ilike(refereeUsers.phone, `%${search}%`),
         )
       : undefined;
 
@@ -1312,8 +1586,8 @@ adminRouter.get("/referral-rewards", async (req: AuthedRequest, res) => {
         rewardAmountGhs: referralRewards.rewardAmountGhs,
         status: referralRewards.status,
         createdAt: referralRewards.createdAt,
-        referrerEmail: referrerUsers.email,
-        refereeEmail: refereeUsers.email,
+        referrerPhone: referrerUsers.phone,
+        refereePhone: refereeUsers.phone,
       })
       .from(referralRewards)
       .innerJoin(referrerUsers, eq(referrerUsers.id, referralRewards.referrerId))
@@ -1350,7 +1624,7 @@ adminRouter.get("/referral-rewards", async (req: AuthedRequest, res) => {
 
 // ============ MANUAL DEPOSITS ============
 
-adminRouter.get("/deposit-settings", async (_req: AuthedRequest, res) => {
+adminRouter.get("/deposit-settings", requirePermission("deposits.manage"), async (_req: AuthedRequest, res) => {
   try {
     const [settings] = await db
       .select({
@@ -1358,7 +1632,7 @@ adminRouter.get("/deposit-settings", async (_req: AuthedRequest, res) => {
         accountName: depositSettings.accountName,
         accountNumber: depositSettings.accountNumber,
         updatedAt: depositSettings.updatedAt,
-        updatedByEmail: users.email,
+        updatedByPhone: users.phone,
       })
       .from(depositSettings)
       .leftJoin(users, eq(users.id, depositSettings.updatedBy))
@@ -1421,7 +1695,156 @@ adminRouter.post(
   },
 );
 
-adminRouter.get("/manual-deposits/pending", async (req: AuthedRequest, res) => {
+// ============ BINANCE PAY ACCOUNTS (one per admin) ============
+
+adminRouter.get(
+  "/binance-pay-account",
+  requirePermission("deposits.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const [account] = await db
+        .select()
+        .from(binancePayAccounts)
+        .where(eq(binancePayAccounts.adminId, req.user!.userId))
+        .limit(1);
+      res.json({ data: account ?? null });
+    } catch (error) {
+      console.error("Error fetching Binance Pay account:", error);
+      res.status(500).json({ error: "Failed to fetch Binance Pay account" });
+    }
+  },
+);
+
+const binancePayAccountSchema = z.object({
+  binanceId: z.string().trim().min(3).max(64),
+  label: z.string().trim().min(2).max(100),
+  isActive: z.boolean().optional().default(true),
+});
+
+adminRouter.put(
+  "/binance-pay-account",
+  requirePermission("deposits.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const parsed = binancePayAccountSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.flatten() });
+      }
+
+      const [account] = await db
+        .insert(binancePayAccounts)
+        .values({ adminId: req.user!.userId, ...parsed.data })
+        .onConflictDoUpdate({
+          target: binancePayAccounts.adminId,
+          set: { ...parsed.data, updatedAt: new Date() },
+        })
+        .returning();
+
+      await logAdminAction(
+        req.user!.userId,
+        "BINANCE_PAY_ACCOUNT_UPDATED",
+        "binance_pay_accounts",
+        account.id,
+        parsed.data,
+      );
+
+      res.json({ data: account });
+    } catch (error) {
+      console.error("Error saving Binance Pay account:", error);
+      res.status(500).json({ error: "Failed to save Binance Pay account" });
+    }
+  },
+);
+
+adminRouter.delete(
+  "/binance-pay-account",
+  requirePermission("deposits.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      await db
+        .delete(binancePayAccounts)
+        .where(eq(binancePayAccounts.adminId, req.user!.userId));
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error removing Binance Pay account:", error);
+      res.status(500).json({ error: "Failed to remove Binance Pay account" });
+    }
+  },
+);
+
+// Which deposit methods users can see on the wallet Deposit tab.
+adminRouter.get("/deposit-methods", requirePermission("deposits.manage"), async (_req: AuthedRequest, res) => {
+  try {
+    const [row] = await db.select().from(depositMethodSettings).limit(1);
+    res.json({
+      data: {
+        momoEnabled: row?.momoEnabled ?? true,
+        cryptoEnabled: row?.cryptoEnabled ?? true,
+        chatEnabled: row?.chatEnabled ?? true,
+        binancePayEnabled: row?.binancePayEnabled ?? true,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching deposit methods:", error);
+    res.status(500).json({ error: "Failed to fetch deposit methods" });
+  }
+});
+
+const depositMethodsSchema = z.object({
+  momoEnabled: z.boolean(),
+  cryptoEnabled: z.boolean(),
+  chatEnabled: z.boolean(),
+  binancePayEnabled: z.boolean(),
+});
+
+adminRouter.put(
+  "/deposit-methods",
+  requirePermission("deposits.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const parsed = depositMethodsSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.flatten() });
+      }
+
+      const values = {
+        ...parsed.data,
+        updatedBy: req.user!.userId,
+        updatedAt: new Date(),
+      };
+
+      const [existing] = await db
+        .select({ id: depositMethodSettings.id })
+        .from(depositMethodSettings)
+        .limit(1);
+      let row;
+      if (existing) {
+        [row] = await db
+          .update(depositMethodSettings)
+          .set(values)
+          .where(eq(depositMethodSettings.id, existing.id))
+          .returning();
+      } else {
+        [row] = await db.insert(depositMethodSettings).values(values).returning();
+      }
+
+      await logAdminAction(
+        req.user!.userId,
+        "DEPOSIT_METHODS_UPDATED",
+        "deposit_method_settings",
+        row.id,
+        parsed.data,
+      );
+
+      res.json({ data: row });
+    } catch (error) {
+      console.error("Error updating deposit methods:", error);
+      res.status(500).json({ error: "Failed to update deposit methods" });
+    }
+  },
+);
+
+adminRouter.get("/manual-deposits/pending", requirePermission("deposits.manage"), async (req: AuthedRequest, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
     const limit = 50;
@@ -1430,13 +1853,16 @@ adminRouter.get("/manual-deposits/pending", async (req: AuthedRequest, res) => {
     const rows = await db
       .select({
         id: manualDeposits.id,
+        method: manualDeposits.method,
         reference: manualDeposits.reference,
         amountGhs: manualDeposits.amountGhs,
         network: manualDeposits.network,
         senderName: manualDeposits.senderName,
         senderNumber: manualDeposits.senderNumber,
+        senderBinanceId: manualDeposits.senderBinanceId,
+        senderEmail: manualDeposits.senderEmail,
         createdAt: manualDeposits.createdAt,
-        userEmail: users.email,
+        userPhone: users.phone,
         userFullName: users.fullName,
       })
       .from(manualDeposits)
@@ -1458,7 +1884,7 @@ adminRouter.get("/manual-deposits/pending", async (req: AuthedRequest, res) => {
   }
 });
 
-adminRouter.get("/manual-deposits/:depositId", async (req: AuthedRequest, res) => {
+adminRouter.get("/manual-deposits/:depositId", requirePermission("deposits.manage"), async (req: AuthedRequest, res) => {
   try {
     const [deposit] = await db
       .select()
@@ -1475,7 +1901,33 @@ adminRouter.get("/manual-deposits/:depositId", async (req: AuthedRequest, res) =
       .from(users)
       .where(eq(users.id, deposit.userId));
 
-    res.json({ data: { ...deposit, user } });
+    let binanceAccount = null;
+    if (deposit.binanceAccountId) {
+      [binanceAccount] = await db
+        .select()
+        .from(binancePayAccounts)
+        .where(eq(binancePayAccounts.id, deposit.binanceAccountId))
+        .limit(1);
+    }
+
+    // The user paid intended + fee (fee is charged on top), so show reviewers
+    // the exact figure to expect on the payment screenshot.
+    const rules = await getPaymentRules();
+    const depositFeePct =
+      deposit.method === "binance_pay" ? rules.binanceDepositFeePct : rules.momoDepositFeePct;
+    const intended = Number(deposit.amountGhs);
+    const expectedPaymentGhs =
+      Math.round(intended * (1 + depositFeePct / 100) * 100) / 100;
+
+    res.json({
+      data: {
+        ...deposit,
+        user,
+        binanceAccount,
+        depositFeePct,
+        expectedPaymentGhs,
+      },
+    });
   } catch (error) {
     console.error("Error fetching manual deposit:", error);
     res.status(500).json({ error: "Failed to fetch manual deposit" });
@@ -1511,6 +1963,8 @@ adminRouter.post(
           : await db.select().from(wallets).where(eq(wallets.userId, deposit.userId)).limit(1);
 
       const balanceBefore = Number(currentWallet.balanceGhs);
+      // The deposit fee is charged on top (the user pays intended + fee), so
+      // the full stored amount is exactly what gets credited.
       const amount = Number(deposit.amountGhs);
       const balanceAfter = balanceBefore + amount;
 
@@ -1519,6 +1973,11 @@ adminRouter.post(
         .set({ balanceGhs: balanceAfter.toFixed(2), updatedAt: new Date() })
         .where(eq(wallets.userId, deposit.userId));
 
+      const description =
+        deposit.method === "binance_pay"
+          ? "Manual Binance Pay deposit"
+          : `Manual mobile money deposit (${deposit.network})`;
+
       await db.insert(walletTransactions).values({
         userId: deposit.userId,
         type: "deposit",
@@ -1526,9 +1985,9 @@ adminRouter.post(
         balanceBeforeGhs: balanceBefore.toFixed(2),
         balanceAfterGhs: balanceAfter.toFixed(2),
         status: "completed",
-        method: "momo",
+        method: deposit.method,
         reference: deposit.reference,
-        description: `Manual mobile money deposit (${deposit.network})`,
+        description,
       });
 
       await db
@@ -1547,6 +2006,15 @@ adminRouter.post(
         depositId,
         { amountGhs: amount, reference: deposit.reference },
       );
+
+      // Notify the user in their live chat thread
+      await db.insert(chatMessages).values({
+        userId: deposit.userId,
+        senderRole: "system",
+        manualDepositId: depositId,
+        body: `Your deposit of GHS ${amount.toFixed(2)} (ref ${deposit.reference}) was approved and your wallet has been credited.`,
+        readByAdmin: true,
+      });
 
       res.json({ success: true, balanceAfter });
     } catch (error) {
@@ -1600,6 +2068,15 @@ adminRouter.post(
         depositId,
         { reason: parsed.data.reason },
       );
+
+      // Notify the user in their live chat thread
+      await db.insert(chatMessages).values({
+        userId: deposit.userId,
+        senderRole: "system",
+        manualDepositId: depositId,
+        body: `Your deposit of GHS ${Number(deposit.amountGhs).toFixed(2)} (ref ${deposit.reference}) was rejected: ${parsed.data.reason}`,
+        readByAdmin: true,
+      });
 
       res.json({ success: true });
     } catch (error) {
@@ -1759,7 +2236,7 @@ adminRouter.get(
       const claims = await db
         .select({
           id: rewardClaims.id,
-          userEmail: users.email,
+          userPhone: users.phone,
           userFullName: users.fullName,
           claimedAmountGhs: rewardClaims.claimedAmountGhs,
           claimedAt: rewardClaims.claimedAt,
@@ -1845,6 +2322,920 @@ adminRouter.patch(
     } catch (error) {
       console.error("Error updating reward pool:", error);
       res.status(500).json({ error: "Failed to update reward pool" });
+    }
+  },
+);
+
+// ============ ANNOUNCEMENTS ============
+
+const createAnnouncementSchema = z.object({
+  title: z.string().trim().min(2).max(200),
+  body: z.string().trim().min(2),
+  isActive: z.boolean().optional().default(false),
+});
+
+const updateAnnouncementSchema = z.object({
+  title: z.string().trim().min(2).max(200).optional(),
+  body: z.string().trim().min(2).optional(),
+  isActive: z.boolean().optional(),
+});
+
+const reorderSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1),
+});
+
+adminRouter.get(
+  "/announcements",
+  requirePermission("announcements.manage"),
+  async (_req: AuthedRequest, res) => {
+    try {
+      const rows = await db
+        .select()
+        .from(announcements)
+        .orderBy(asc(announcements.sortOrder), asc(announcements.createdAt));
+      res.json({ data: rows });
+    } catch (error) {
+      console.error("Error fetching announcements:", error);
+      res.status(500).json({ error: "Failed to fetch announcements" });
+    }
+  },
+);
+
+adminRouter.post(
+  "/announcements",
+  requirePermission("announcements.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const parsed = createAnnouncementSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.flatten() });
+      }
+      // New items go to the end of the current order.
+      const [{ max }] = await db
+        .select({ max: sql<number>`COALESCE(MAX(sort_order), -1)` })
+        .from(announcements);
+      const [row] = await db
+        .insert(announcements)
+        .values({ ...parsed.data, sortOrder: Number(max) + 1 })
+        .returning();
+      await logAdminAction(req.user!.userId, "CREATE_ANNOUNCEMENT", "announcements", row.id);
+      res.status(201).json({ data: row });
+    } catch (error) {
+      console.error("Error creating announcement:", error);
+      res.status(500).json({ error: "Failed to create announcement" });
+    }
+  },
+);
+
+adminRouter.patch(
+  "/announcements/:id",
+  requirePermission("announcements.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const parsed = updateAnnouncementSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.flatten() });
+      }
+      const [row] = await db
+        .update(announcements)
+        .set({ ...parsed.data, updatedAt: new Date() })
+        .where(eq(announcements.id, req.params.id))
+        .returning();
+      if (!row) {
+        return res.status(404).json({ error: "Announcement not found" });
+      }
+      await logAdminAction(req.user!.userId, "UPDATE_ANNOUNCEMENT", "announcements", row.id, parsed.data);
+      res.json({ data: row });
+    } catch (error) {
+      console.error("Error updating announcement:", error);
+      res.status(500).json({ error: "Failed to update announcement" });
+    }
+  },
+);
+
+adminRouter.post(
+  "/announcements/reorder",
+  requirePermission("announcements.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const parsed = reorderSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.flatten() });
+      }
+      // Assign sortOrder by the given order of ids.
+      await Promise.all(
+        parsed.data.ids.map((id, index) =>
+          db
+            .update(announcements)
+            .set({ sortOrder: index, updatedAt: new Date() })
+            .where(eq(announcements.id, id)),
+        ),
+      );
+      await logAdminAction(req.user!.userId, "REORDER_ANNOUNCEMENTS", "announcements", "");
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error reordering announcements:", error);
+      res.status(500).json({ error: "Failed to reorder announcements" });
+    }
+  },
+);
+
+adminRouter.delete(
+  "/announcements/:id",
+  requirePermission("announcements.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const [row] = await db
+        .delete(announcements)
+        .where(eq(announcements.id, req.params.id))
+        .returning();
+      if (!row) {
+        return res.status(404).json({ error: "Announcement not found" });
+      }
+      await logAdminAction(req.user!.userId, "DELETE_ANNOUNCEMENT", "announcements", req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting announcement:", error);
+      res.status(500).json({ error: "Failed to delete announcement" });
+    }
+  },
+);
+
+// ============ SUPPORT SETTINGS ============
+
+const supportSettingsSchema = z.object({
+  whatsappChannelUrl: z.string().trim().url().max(500).or(z.literal("")).optional(),
+  telegramGroupUrl: z.string().trim().url().max(500).or(z.literal("")).optional(),
+  telegramProfiles: z
+    .array(
+      z.object({
+        label: z.string().trim().max(60).optional().default(""),
+        url: z.string().trim().url().max(500),
+      }),
+    )
+    .max(10)
+    .optional()
+    .default([]),
+});
+
+adminRouter.get(
+  "/support-settings",
+  requirePermission("support.manage"),
+  async (_req: AuthedRequest, res) => {
+    try {
+      const [row] = await db.select().from(supportSettings).limit(1);
+      res.json({
+        data: row ?? {
+          whatsappChannelUrl: "",
+          telegramGroupUrl: "",
+          telegramProfiles: [],
+        },
+      });
+    } catch (error) {
+      console.error("Error fetching support settings:", error);
+      res.status(500).json({ error: "Failed to fetch support settings" });
+    }
+  },
+);
+
+adminRouter.put(
+  "/support-settings",
+  requirePermission("support.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const parsed = supportSettingsSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.flatten() });
+      }
+      const values = {
+        whatsappChannelUrl: parsed.data.whatsappChannelUrl?.trim() || null,
+        telegramGroupUrl: parsed.data.telegramGroupUrl?.trim() || null,
+        telegramProfiles: (parsed.data.telegramProfiles ?? []).map((p) => ({
+          label: p.label?.trim() || "",
+          url: p.url.trim(),
+        })),
+        updatedAt: new Date(),
+      };
+
+      const [existing] = await db.select({ id: supportSettings.id }).from(supportSettings).limit(1);
+      let row;
+      if (existing) {
+        [row] = await db
+          .update(supportSettings)
+          .set(values)
+          .where(eq(supportSettings.id, existing.id))
+          .returning();
+      } else {
+        [row] = await db.insert(supportSettings).values(values).returning();
+      }
+
+      await logAdminAction(req.user!.userId, "UPDATE_SUPPORT_SETTINGS", "support_settings", row.id);
+      res.json({ data: row });
+    } catch (error) {
+      console.error("Error updating support settings:", error);
+      res.status(500).json({ error: "Failed to update support settings" });
+    }
+  },
+);
+
+// ============ LIVE CHATS ============
+
+// Deposits linked to a user's chat, joined live so top-up cards always
+// reflect the current review status.
+async function getChatDepositsForUser(userId: string) {
+  return db
+    .select({
+      id: manualDeposits.id,
+      reference: manualDeposits.reference,
+      amountGhs: manualDeposits.amountGhs,
+      status: manualDeposits.status,
+      rejectionReason: manualDeposits.rejectionReason,
+      screenshotUrl: manualDeposits.screenshotUrl,
+    })
+    .from(manualDeposits)
+    .where(eq(manualDeposits.userId, userId))
+    .orderBy(desc(manualDeposits.createdAt))
+    .limit(50);
+}
+
+async function getAdminName(adminId: string): Promise<string> {
+  const [admin] = await db
+    .select({ fullName: users.fullName })
+    .from(users)
+    .where(eq(users.id, adminId))
+    .limit(1);
+  return admin?.fullName ?? "Admin";
+}
+
+adminRouter.get(
+  "/chats",
+  requirePermission("chats.manage"),
+  async (_req: AuthedRequest, res) => {
+    try {
+      const convos = await db
+        .select({
+          userId: chatMessages.userId,
+          lastMessageAt: sql<string>`max(${chatMessages.createdAt})`,
+          unreadCount: sql<number>`count(*) filter (where ${chatMessages.senderRole} = 'user' and ${chatMessages.readByAdmin} = false)`,
+        })
+        .from(chatMessages)
+        .groupBy(chatMessages.userId)
+        .orderBy(sql`max(${chatMessages.createdAt}) desc`)
+        .limit(100);
+
+      if (convos.length === 0) {
+        return res.json({ data: [] });
+      }
+
+      const userIds = convos.map((c) => c.userId);
+      const [convoUsers, recentMessages, locks] = await Promise.all([
+        db
+          .select({
+            id: users.id,
+            fullName: users.fullName,
+            phone: users.phone,
+          })
+          .from(users)
+          .where(inArray(users.id, userIds)),
+        db
+          .select()
+          .from(chatMessages)
+          .where(inArray(chatMessages.userId, userIds))
+          .orderBy(desc(chatMessages.createdAt))
+          .limit(300),
+        db
+          .select()
+          .from(chatThreadLocks)
+          .where(inArray(chatThreadLocks.threadUserId, userIds)),
+      ]);
+
+      const userMap = new Map(convoUsers.map((u) => [u.id, u]));
+      const lockMap = new Map(locks.map((l) => [l.threadUserId, l]));
+      // First message per user in the desc-ordered list = latest message
+      const latestByUser = new Map<string, (typeof recentMessages)[number]>();
+      for (const msg of recentMessages) {
+        if (!latestByUser.has(msg.userId)) latestByUser.set(msg.userId, msg);
+      }
+
+      const data = convos.map((c) => {
+        const u = userMap.get(c.userId);
+        const last = latestByUser.get(c.userId);
+        const lock = lockMap.get(c.userId);
+        let preview = last?.body ?? "";
+        if (!preview && last?.imageUrl) preview = "Image";
+        if (!preview && last?.manualDepositId) preview = "Top-up request";
+        return {
+          userId: c.userId,
+          userFullName: u?.fullName ?? "Unknown",
+          userPhone: u?.phone ?? "",
+          lastMessageAt: c.lastMessageAt,
+          lastMessagePreview: preview,
+          unreadCount: Number(c.unreadCount),
+          lockedByAdminName: lock?.adminName ?? null,
+        };
+      });
+
+      res.json({ data });
+    } catch (error) {
+      console.error("Error fetching chats:", error);
+      res.status(500).json({ error: "Failed to fetch chats" });
+    }
+  },
+);
+
+adminRouter.get(
+  "/chats/unread",
+  requirePermission("chats.manage"),
+  async (_req: AuthedRequest, res) => {
+    try {
+      const [row] = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(chatMessages)
+        .where(
+          and(
+            eq(chatMessages.senderRole, "user"),
+            eq(chatMessages.readByAdmin, false),
+          ),
+        );
+      res.json({ count: Number(row?.count ?? 0) });
+    } catch (error) {
+      console.error("Error fetching chat unread count:", error);
+      res.status(500).json({ error: "Failed to fetch unread count" });
+    }
+  },
+);
+
+// Always returns the full thread (capped at 200 messages) rather than an
+// incremental slice: messages can be hard-deleted with no tombstone left
+// behind, so a partial "since last poll" fetch could never signal a removal
+// to a client that already has the deleted message loaded.
+adminRouter.get(
+  "/chats/:userId/messages",
+  requirePermission("chats.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const { userId } = req.params;
+      const senderAlias = alias(users, "chat_sender");
+
+      const [messages, deposits, [user], [lock]] = await Promise.all([
+        db
+          .select({
+            id: chatMessages.id,
+            userId: chatMessages.userId,
+            senderId: chatMessages.senderId,
+            senderRole: chatMessages.senderRole,
+            body: chatMessages.body,
+            imageUrl: chatMessages.imageUrl,
+            manualDepositId: chatMessages.manualDepositId,
+            readByUser: chatMessages.readByUser,
+            readByAdmin: chatMessages.readByAdmin,
+            createdAt: chatMessages.createdAt,
+            editedAt: chatMessages.editedAt,
+            editedByAdminName: chatMessages.editedByAdminName,
+            senderName: senderAlias.fullName,
+          })
+          .from(chatMessages)
+          .leftJoin(senderAlias, eq(chatMessages.senderId, senderAlias.id))
+          .where(eq(chatMessages.userId, userId))
+          .orderBy(asc(chatMessages.createdAt))
+          .limit(200),
+        getChatDepositsForUser(userId),
+        db
+          .select({
+            id: users.id,
+            fullName: users.fullName,
+            phone: users.phone,
+          })
+          .from(users)
+          .where(eq(users.id, userId))
+          .limit(1),
+        db
+          .select()
+          .from(chatThreadLocks)
+          .where(eq(chatThreadLocks.threadUserId, userId))
+          .limit(1),
+      ]);
+
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      res.json({ messages, deposits, user, lock: lock ?? null });
+    } catch (error) {
+      console.error("Error fetching chat messages:", error);
+      res.status(500).json({ error: "Failed to fetch messages" });
+    }
+  },
+);
+
+const adminSendMessageSchema = z
+  .object({
+    body: z.string().trim().min(1).max(2000).optional(),
+    imageUrl: z.string().url().optional(),
+  })
+  .refine((data) => data.body || data.imageUrl, {
+    message: "Message must have text or an image",
+  });
+
+adminRouter.post(
+  "/chats/:userId/messages",
+  requirePermission("chats.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const { userId } = req.params;
+      const parsed = adminSendMessageSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.flatten() });
+      }
+
+      const [user] = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const adminName = await getAdminName(req.user!.userId);
+
+      const [message] = await db
+        .insert(chatMessages)
+        .values({
+          userId,
+          senderId: req.user!.userId,
+          senderRole: "admin",
+          body: parsed.data.body ?? null,
+          imageUrl: parsed.data.imageUrl ?? null,
+          readByAdmin: true,
+        })
+        .returning();
+
+      await logAdminAction(
+        req.user!.userId,
+        "CHAT_MESSAGE_SENT",
+        "chat_messages",
+        message.id,
+        { targetUserId: userId },
+      );
+
+      publishChatEvent(userId, { type: "messages-changed" }).catch((err) =>
+        console.error("Realtime publish failed:", err),
+      );
+
+      res.status(201).json({ message: { ...message, senderName: adminName } });
+    } catch (error) {
+      console.error("Error sending chat message:", error);
+      res.status(500).json({ error: "Failed to send message" });
+    }
+  },
+);
+
+const editMessageSchema = z.object({
+  body: z.string().trim().min(1).max(2000),
+});
+
+adminRouter.patch(
+  "/chats/:userId/messages/:messageId",
+  requirePermission("chats.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const { userId, messageId } = req.params;
+      const parsed = editMessageSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.flatten() });
+      }
+
+      const [existing] = await db
+        .select()
+        .from(chatMessages)
+        .where(and(eq(chatMessages.id, messageId), eq(chatMessages.userId, userId)))
+        .limit(1);
+      if (!existing) {
+        return res.status(404).json({ error: "Message not found" });
+      }
+      if (existing.manualDepositId) {
+        return res.status(400).json({ error: "Cannot edit a top-up request card" });
+      }
+
+      const adminName = await getAdminName(req.user!.userId);
+
+      const [message] = await db
+        .update(chatMessages)
+        .set({
+          body: parsed.data.body,
+          editedAt: new Date(),
+          editedByAdminName: adminName,
+        })
+        .where(eq(chatMessages.id, messageId))
+        .returning();
+
+      await logAdminAction(
+        req.user!.userId,
+        "CHAT_MESSAGE_EDITED",
+        "chat_messages",
+        messageId,
+        { targetUserId: userId, previousBody: existing.body, newBody: parsed.data.body },
+      );
+
+      publishChatEvent(userId, { type: "messages-changed" }).catch((err) =>
+        console.error("Realtime publish failed:", err),
+      );
+
+      res.json({ message });
+    } catch (error) {
+      console.error("Error editing chat message:", error);
+      res.status(500).json({ error: "Failed to edit message" });
+    }
+  },
+);
+
+adminRouter.delete(
+  "/chats/:userId/messages/:messageId",
+  requirePermission("chats.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const { userId, messageId } = req.params;
+
+      const [existing] = await db
+        .select()
+        .from(chatMessages)
+        .where(and(eq(chatMessages.id, messageId), eq(chatMessages.userId, userId)))
+        .limit(1);
+      if (!existing) {
+        return res.status(404).json({ error: "Message not found" });
+      }
+      if (existing.manualDepositId) {
+        return res.status(400).json({ error: "Cannot delete a top-up request card" });
+      }
+
+      // Hard delete: the row is permanently removed, nothing is kept.
+      await db.delete(chatMessages).where(eq(chatMessages.id, messageId));
+
+      await logAdminAction(
+        req.user!.userId,
+        "CHAT_MESSAGE_DELETED",
+        "chat_messages",
+        messageId,
+        { targetUserId: userId, body: existing.body, imageUrl: existing.imageUrl },
+      );
+
+      publishChatEvent(userId, { type: "messages-changed" }).catch((err) =>
+        console.error("Realtime publish failed:", err),
+      );
+
+      res.json({ success: true, messageId });
+    } catch (error) {
+      console.error("Error deleting chat message:", error);
+      res.status(500).json({ error: "Failed to delete message" });
+    }
+  },
+);
+
+adminRouter.post(
+  "/chats/:userId/read",
+  requirePermission("chats.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      await db
+        .update(chatMessages)
+        .set({ readByAdmin: true })
+        .where(
+          and(
+            eq(chatMessages.userId, req.params.userId),
+            eq(chatMessages.readByAdmin, false),
+          ),
+        );
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error marking chat read:", error);
+      res.status(500).json({ error: "Failed to mark as read" });
+    }
+  },
+);
+
+// ============ THREAD LOCKS (pessimistic locking for multi-admin chat) ============
+
+// Claim a thread. No-ops (returns the existing lock) if the caller already
+// holds it; fails if someone else does — use /takeover to override that.
+adminRouter.post(
+  "/chats/:userId/lock",
+  requirePermission("chats.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const { userId } = req.params;
+      const adminId = req.user!.userId;
+
+      const [existing] = await db
+        .select()
+        .from(chatThreadLocks)
+        .where(eq(chatThreadLocks.threadUserId, userId))
+        .limit(1);
+
+      if (existing && existing.adminId !== adminId) {
+        return res.status(409).json({ error: "Chat already claimed by another admin", lock: existing });
+      }
+      if (existing) {
+        return res.json({ lock: existing });
+      }
+
+      const adminName = await getAdminName(adminId);
+      const [lock] = await db
+        .insert(chatThreadLocks)
+        .values({ threadUserId: userId, adminId, adminName })
+        .returning();
+
+      publishChatEvent(userId, { type: "lock-changed" }).catch((err) =>
+        console.error("Realtime publish failed:", err),
+      );
+
+      res.json({ lock });
+    } catch (error) {
+      console.error("Error claiming chat lock:", error);
+      res.status(500).json({ error: "Failed to claim chat" });
+    }
+  },
+);
+
+// Release a lock the caller holds.
+adminRouter.delete(
+  "/chats/:userId/lock",
+  requirePermission("chats.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const { userId } = req.params;
+      const adminId = req.user!.userId;
+
+      const [existing] = await db
+        .select()
+        .from(chatThreadLocks)
+        .where(eq(chatThreadLocks.threadUserId, userId))
+        .limit(1);
+      if (!existing || existing.adminId !== adminId) {
+        return res.status(404).json({ error: "You do not hold this lock" });
+      }
+
+      await db.delete(chatThreadLocks).where(eq(chatThreadLocks.threadUserId, userId));
+
+      publishChatEvent(userId, { type: "lock-changed" }).catch((err) =>
+        console.error("Realtime publish failed:", err),
+      );
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error releasing chat lock:", error);
+      res.status(500).json({ error: "Failed to release chat" });
+    }
+  },
+);
+
+// Forcibly transfer a lock held by another admin (e.g. they stepped away).
+// Logged for accountability since it overrides another admin's claim.
+adminRouter.post(
+  "/chats/:userId/lock/takeover",
+  requirePermission("chats.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const { userId } = req.params;
+      const adminId = req.user!.userId;
+
+      const [existing] = await db
+        .select()
+        .from(chatThreadLocks)
+        .where(eq(chatThreadLocks.threadUserId, userId))
+        .limit(1);
+
+      const adminName = await getAdminName(adminId);
+      const [lock] = await db
+        .insert(chatThreadLocks)
+        .values({ threadUserId: userId, adminId, adminName })
+        .onConflictDoUpdate({
+          target: chatThreadLocks.threadUserId,
+          set: { adminId, adminName, lockedAt: new Date() },
+        })
+        .returning();
+
+      await logAdminAction(
+        adminId,
+        "CHAT_LOCK_TAKEOVER",
+        "chat_thread_locks",
+        userId,
+        { targetUserId: userId, previousAdminId: existing?.adminId ?? null, previousAdminName: existing?.adminName ?? null },
+      );
+
+      publishChatEvent(userId, { type: "lock-changed" }).catch((err) =>
+        console.error("Realtime publish failed:", err),
+      );
+
+      res.json({ lock });
+    } catch (error) {
+      console.error("Error taking over chat lock:", error);
+      res.status(500).json({ error: "Failed to take over chat" });
+    }
+  },
+);
+
+const typingSchema = z.object({ isTyping: z.boolean() });
+
+// Ephemeral — no DB write, just relays a ready-made broadcast signal to
+// whoever is currently subscribed to this thread's realtime channel.
+adminRouter.post(
+  "/chats/:userId/typing",
+  requirePermission("chats.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const { userId } = req.params;
+      const parsed = typingSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.flatten() });
+      }
+
+      const adminName = await getAdminName(req.user!.userId);
+      await publishChatEvent(userId, {
+        type: "typing",
+        adminName,
+        isTyping: parsed.data.isTyping,
+      });
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error broadcasting typing state:", error);
+      res.status(500).json({ error: "Failed to broadcast typing state" });
+    }
+  },
+);
+
+adminRouter.post(
+  "/chats/upload",
+  requirePermission("chats.manage"),
+  upload.single("image"),
+  async (req: AuthedRequest, res) => {
+    if (!req.file) {
+      return res.status(400).json({ error: "No image file provided" });
+    }
+    try {
+      const url = await uploadPaymentScreenshot(
+        req.file.buffer,
+        req.file.mimetype,
+        req.file.originalname,
+      );
+      res.json({ url });
+    } catch (error) {
+      console.error("Error uploading chat image:", error);
+      res.status(500).json({ error: "Failed to upload image" });
+    }
+  },
+);
+
+// ============ PAYMENT SETTINGS (limits, fees, withdrawal windows) ============
+
+const nullableAmount = z.preprocess(
+  (v) => (v === "" || v == null ? null : v),
+  z.coerce.number().nonnegative().nullable(),
+);
+const nullableTime = z.preprocess(
+  (v) => (v === "" || v == null ? null : v),
+  z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).nullable(),
+);
+
+const paymentSettingsInputSchema = z
+  .object({
+    momoMinDepositGhs: nullableAmount.optional().default(null),
+    momoMaxDepositGhs: nullableAmount.optional().default(null),
+    momoDepositFeePct: z.coerce.number().min(0).max(100).optional().default(0),
+    cryptoMinDepositGhs: nullableAmount.optional().default(null),
+    cryptoMaxDepositGhs: nullableAmount.optional().default(null),
+    binanceMinDepositGhs: nullableAmount.optional().default(null),
+    binanceMaxDepositGhs: nullableAmount.optional().default(null),
+    binanceDepositFeePct: z.coerce.number().min(0).max(100).optional().default(0),
+    minWithdrawalGhs: nullableAmount.optional().default(null),
+    maxWithdrawalGhs: nullableAmount.optional().default(null),
+    withdrawalFeePct: z.coerce.number().min(0).max(100).optional().default(0),
+    withdrawalDays: z
+      .array(z.coerce.number().int().min(0).max(6))
+      .max(7)
+      .optional()
+      .default([]),
+    withdrawalStartTime: nullableTime.optional().default(null),
+    withdrawalEndTime: nullableTime.optional().default(null),
+  })
+  .refine(
+    (d) =>
+      d.momoMinDepositGhs == null ||
+      d.momoMaxDepositGhs == null ||
+      d.momoMaxDepositGhs >= d.momoMinDepositGhs,
+    { message: "Maximum deposit must be at least the minimum deposit" },
+  )
+  .refine(
+    (d) =>
+      d.cryptoMinDepositGhs == null ||
+      d.cryptoMaxDepositGhs == null ||
+      d.cryptoMaxDepositGhs >= d.cryptoMinDepositGhs,
+    { message: "Maximum crypto deposit must be at least the minimum crypto deposit" },
+  )
+  .refine(
+    (d) =>
+      d.binanceMinDepositGhs == null ||
+      d.binanceMaxDepositGhs == null ||
+      d.binanceMaxDepositGhs >= d.binanceMinDepositGhs,
+    { message: "Maximum Binance Pay deposit must be at least the minimum" },
+  )
+  .refine(
+    (d) =>
+      d.minWithdrawalGhs == null ||
+      d.maxWithdrawalGhs == null ||
+      d.maxWithdrawalGhs >= d.minWithdrawalGhs,
+    { message: "Maximum withdrawal must be at least the minimum withdrawal" },
+  )
+  .refine((d) => (d.withdrawalStartTime == null) === (d.withdrawalEndTime == null), {
+    message: "Set both start and end time, or leave both blank for any time",
+  });
+
+adminRouter.get(
+  "/payment-settings",
+  requirePermission("payments.manage"),
+  async (_req: AuthedRequest, res) => {
+    try {
+      const [row] = await db.select().from(paymentSettings).limit(1);
+      res.json({
+        data: row ?? {
+          momoMinDepositGhs: null,
+          momoMaxDepositGhs: null,
+          momoDepositFeePct: "0",
+          cryptoMinDepositGhs: null,
+          cryptoMaxDepositGhs: null,
+          binanceMinDepositGhs: null,
+          binanceMaxDepositGhs: null,
+          binanceDepositFeePct: "0",
+          minWithdrawalGhs: null,
+          maxWithdrawalGhs: null,
+          withdrawalFeePct: "0",
+          withdrawalDays: [],
+          withdrawalStartTime: null,
+          withdrawalEndTime: null,
+        },
+      });
+    } catch (error) {
+      console.error("Error fetching payment settings:", error);
+      res.status(500).json({ error: "Failed to fetch payment settings" });
+    }
+  },
+);
+
+adminRouter.put(
+  "/payment-settings",
+  requirePermission("payments.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const parsed = paymentSettingsInputSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.flatten() });
+      }
+      const d = parsed.data;
+      const values = {
+        momoMinDepositGhs: d.momoMinDepositGhs?.toFixed(2) ?? null,
+        momoMaxDepositGhs: d.momoMaxDepositGhs?.toFixed(2) ?? null,
+        momoDepositFeePct: d.momoDepositFeePct.toFixed(2),
+        cryptoMinDepositGhs: d.cryptoMinDepositGhs?.toFixed(2) ?? null,
+        cryptoMaxDepositGhs: d.cryptoMaxDepositGhs?.toFixed(2) ?? null,
+        binanceMinDepositGhs: d.binanceMinDepositGhs?.toFixed(2) ?? null,
+        binanceMaxDepositGhs: d.binanceMaxDepositGhs?.toFixed(2) ?? null,
+        binanceDepositFeePct: d.binanceDepositFeePct.toFixed(2),
+        minWithdrawalGhs: d.minWithdrawalGhs?.toFixed(2) ?? null,
+        maxWithdrawalGhs: d.maxWithdrawalGhs?.toFixed(2) ?? null,
+        withdrawalFeePct: d.withdrawalFeePct.toFixed(2),
+        withdrawalDays: [...new Set(d.withdrawalDays)].sort((a, b) => a - b),
+        withdrawalStartTime: d.withdrawalStartTime,
+        withdrawalEndTime: d.withdrawalEndTime,
+        updatedAt: new Date(),
+      };
+
+      const [existing] = await db
+        .select({ id: paymentSettings.id })
+        .from(paymentSettings)
+        .limit(1);
+      let row;
+      if (existing) {
+        [row] = await db
+          .update(paymentSettings)
+          .set(values)
+          .where(eq(paymentSettings.id, existing.id))
+          .returning();
+      } else {
+        [row] = await db.insert(paymentSettings).values(values).returning();
+      }
+
+      await logAdminAction(
+        req.user!.userId,
+        "UPDATE_PAYMENT_SETTINGS",
+        "payment_settings",
+        row.id,
+        values as Record<string, unknown>,
+      );
+      res.json({ data: row });
+    } catch (error) {
+      console.error("Error updating payment settings:", error);
+      res.status(500).json({ error: "Failed to update payment settings" });
     }
   },
 );

@@ -1,10 +1,11 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
-import { ArrowRight, Gift, Globe2, Lock, Mail, User } from "lucide-react";
+import { ArrowRight, Gift, Globe2, Lock, Phone, ShieldCheck, User } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
 import { useAuthStore } from "../lib/store";
 import { COUNTRIES } from "../lib/countries";
+import { PHONE_RULES } from "../lib/phone";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
@@ -22,12 +23,20 @@ export function SignupPage() {
   const setSession = useAuthStore((s) => s.setSession);
   const [form, setForm] = useState({
     fullName: "",
-    email: "",
+    phone: "",
     password: "",
     country: "GH",
     referralCode: searchParams.get("ref") ?? "",
   });
   const [loading, setLoading] = useState(false);
+
+  const phoneRule = PHONE_RULES[form.country];
+  const phonePlaceholder = phoneRule
+    ? `+${phoneRule.callingCode} ${"X".repeat(phoneRule.digits)}`
+    : "+233 5X XXX XXXX";
+  const phoneHint = phoneRule
+    ? `Format: +${phoneRule.callingCode} followed by ${phoneRule.digits} digits`
+    : undefined;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -45,16 +54,21 @@ export function SignupPage() {
   }
 
   return (
-    <div className="flex min-h-full flex-col justify-center py-6">
-      <div className="mb-8">
-        <h1 className="text-2xl font-extrabold tracking-tight text-ink-900">
+    <div className="pb-6">
+      <div className="-mx-4 -mt-16 rounded-b-[2rem] bg-gradient-to-br from-primary to-sky-600 px-4 pb-12 pt-24 text-center sm:-mx-6 sm:px-6">
+        <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-white/15 text-white">
+          <ShieldCheck size={26} />
+        </div>
+        <h1 className="mt-4 text-2xl font-extrabold tracking-tight text-white">
           Create your account
         </h1>
-        <p className="mt-1 text-sm text-ink-500">
-          Start investing in real estate across Africa.
+        <p className="mt-1 text-sm text-white/60">
+          Invest in daily-return packages across forex, crypto, and real
+          estate.
         </p>
       </div>
 
+      <div className="relative -mt-6 rounded-2xl border border-border bg-card p-5 shadow-soft-lg">
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <Label htmlFor="fullName">Full name</Label>
@@ -69,16 +83,36 @@ export function SignupPage() {
         </div>
 
         <div>
-          <Label htmlFor="email">Email</Label>
+          <Label>Country</Label>
+          <Select
+            value={form.country}
+            onValueChange={(v) => setForm({ ...form, country: v, phone: "" })}
+          >
+            <SelectTrigger icon={<Globe2 size={18} />}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {COUNTRIES.map((c) => (
+                <SelectItem key={c.code} value={c.code}>
+                  {c.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div>
+          <Label htmlFor="phone">Phone number</Label>
           <Input
-            id="email"
-            type="email"
+            id="phone"
+            type="tel"
             required
-            icon={<Mail size={18} />}
-            value={form.email}
-            onChange={(e) => setForm({ ...form, email: e.target.value })}
-            placeholder="you@example.com"
+            icon={<Phone size={18} />}
+            value={form.phone}
+            onChange={(e) => setForm({ ...form, phone: e.target.value })}
+            placeholder={phonePlaceholder}
           />
+          {phoneHint && <p className="mt-1 text-xs text-ink-400">{phoneHint}</p>}
         </div>
 
         <div>
@@ -96,25 +130,6 @@ export function SignupPage() {
         </div>
 
         <div>
-          <Label>Country</Label>
-          <Select
-            value={form.country}
-            onValueChange={(v) => setForm({ ...form, country: v })}
-          >
-            <SelectTrigger icon={<Globe2 size={18} />}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {COUNTRIES.map((c) => (
-                <SelectItem key={c.code} value={c.code}>
-                  {c.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div>
           <Label htmlFor="referralCode">Referral code (optional)</Label>
           <Input
             id="referralCode"
@@ -129,7 +144,6 @@ export function SignupPage() {
 
         <Button
           type="submit"
-          variant="brand"
           size="lg"
           disabled={loading}
           className="w-full"
@@ -139,7 +153,13 @@ export function SignupPage() {
         </Button>
       </form>
 
-      <p className="mt-6 text-center text-sm text-ink-500">
+      <p className="mt-4 flex items-center justify-center gap-1.5 text-xs text-ink-400">
+        <ShieldCheck size={13} />
+        Your details are encrypted and never shared
+      </p>
+      </div>
+
+      <p className="mt-5 text-center text-sm text-ink-500">
         Already have an account?{" "}
         <Link to="/login" className="font-semibold text-primary">
           Log in

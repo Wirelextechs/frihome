@@ -1,7 +1,7 @@
 import { Router } from "express";
 import multer from "multer";
 import { z } from "zod";
-import { desc, eq, and, sql } from "drizzle-orm";
+import { desc, eq, and, gte, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
   wallets,
@@ -9,11 +9,14 @@ import {
   withdrawalMethods,
   users,
   depositSettings,
+  depositMethodSettings,
   manualDeposits,
   rewardPools,
   rewardClaims,
   rewardPoolAudit,
   auditLogs,
+  chatMessages,
+  binancePayAccounts,
 } from "../db/schema.js";
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import {
@@ -25,6 +28,7 @@ import { CRYPTO_MIN_WITHDRAW_USD } from "../lib/nowpayments.js";
 import { getGhsPerUsd } from "../lib/fx.js";
 import { generateDepositReference } from "../lib/manualDeposits.js";
 import { uploadPaymentScreenshot } from "../lib/storage.js";
+import { checkWithdrawalWindow, getPaymentRules } from "../lib/paymentSettings.js";
 
 export const walletRouter = Router();
 
@@ -144,50 +148,16 @@ walletRouter.get("/", requireAuth, async (req: AuthedRequest, res) => {
   });
 });
 
-const depositSchema = z.object({
-  amountGhs: z.string(),
-  method: z.enum(["momo", "bank", "crypto"]),
-});
-
-walletRouter.post("/deposit", requireAuth, async (req: AuthedRequest, res) => {
-  const parsed = depositSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: parsed.error.flatten() });
-  }
-  const userId = req.user!.userId;
-  const amount = Number(parsed.data.amountGhs);
-  if (!(amount > 0)) {
-    return res.status(400).json({ error: "Amount must be greater than zero" });
-  }
-
-  const wallet = await getOrCreateWallet(userId);
-  const balanceBefore = Number(wallet.balanceGhs);
-  const balanceAfter = balanceBefore + amount;
-
-  // NOTE: this credits the wallet immediately for demo purposes. In
-  // production this must only happen after the Paystack/crypto payment
-  // provider confirms the funds actually arrived (see routes/payments.ts).
-  const [updated] = await db
-    .update(wallets)
-    .set({ balanceGhs: balanceAfter.toFixed(2), updatedAt: new Date() })
-    .where(eq(wallets.userId, userId))
-    .returning();
-
-  const [transaction] = await db
-    .insert(walletTransactions)
-    .values({
-      userId,
-      type: "deposit",
-      amountGhs: amount.toFixed(2),
-      balanceBeforeGhs: balanceBefore.toFixed(2),
-      balanceAfterGhs: balanceAfter.toFixed(2),
-      status: "completed",
-      method: parsed.data.method,
-      description: `Deposit via ${parsed.data.method}`,
-    })
-    .returning();
-
-  res.status(201).json({ wallet: updated, transaction });
+// NOTE: the old POST /deposit endpoint that credited the wallet instantly
+// with no payment was a demo shortcut and a critical vulnerability (any user
+// could mint unlimited balance). It has been removed. All deposits must flow
+// through admin-reviewed manual deposits (/manual-deposits) or the verified
+// NOWPayments crypto IPN (routes/payments.ts). Reject any lingering callers.
+walletRouter.post("/deposit", requireAuth, (_req, res) => {
+  res.status(410).json({
+    error:
+      "This endpoint has been removed. Top up via mobile money or crypto from the wallet page.",
+  });
 });
 
 const withdrawSchema = z.object({
@@ -204,6 +174,22 @@ walletRouter.post("/withdraw", requireAuth, async (req: AuthedRequest, res) => {
   const amount = Number(parsed.data.amountGhs);
   if (!(amount > 0)) {
     return res.status(400).json({ error: "Amount must be greater than zero" });
+  }
+
+  const rules = await getPaymentRules();
+  const window = checkWithdrawalWindow(rules);
+  if (!window.allowed) {
+    return res.status(400).json({ error: window.reason });
+  }
+  if (rules.minWithdrawalGhs !== null && amount < rules.minWithdrawalGhs) {
+    return res.status(400).json({
+      error: `Minimum withdrawal is GHS ${rules.minWithdrawalGhs.toFixed(2)}`,
+    });
+  }
+  if (rules.maxWithdrawalGhs !== null && amount > rules.maxWithdrawalGhs) {
+    return res.status(400).json({
+      error: `Maximum withdrawal is GHS ${rules.maxWithdrawalGhs.toFixed(2)}`,
+    });
   }
 
   const [method] = await db
@@ -225,32 +211,58 @@ walletRouter.post("/withdraw", requireAuth, async (req: AuthedRequest, res) => {
     }
   }
 
-  const wallet = await getOrCreateWallet(userId);
-  const balanceBefore = Number(wallet.balanceGhs);
-  if (amount > balanceBefore) {
+  await getOrCreateWallet(userId);
+
+  // Fee is charged on the requested amount; the payout the admin sends is
+  // the remainder. Recorded in the description for both user and admin.
+  const feeGhs = Math.round(amount * (rules.withdrawalFeePct / 100) * 100) / 100;
+  const payoutGhs = Math.round((amount - feeGhs) * 100) / 100;
+
+  // Debit atomically with a balance guard so concurrent withdrawals can't
+  // overdraw the wallet (the UPDATE only applies if the funds are still
+  // there). Returns null when the balance is insufficient.
+  const result = await db.transaction(async (tx) => {
+    const [debited] = await tx
+      .update(wallets)
+      .set({
+        balanceGhs: sql`${wallets.balanceGhs} - ${amount.toFixed(2)}`,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(wallets.userId, userId),
+          gte(wallets.balanceGhs, amount.toFixed(2)),
+        ),
+      )
+      .returning();
+    if (!debited) return null;
+
+    const balanceAfter = Number(debited.balanceGhs);
+    const balanceBefore = balanceAfter + amount;
+
+    const [txn] = await tx
+      .insert(walletTransactions)
+      .values({
+        userId,
+        type: "withdrawal",
+        amountGhs: amount.toFixed(2),
+        balanceBeforeGhs: balanceBefore.toFixed(2),
+        balanceAfterGhs: balanceAfter.toFixed(2),
+        status: "pending",
+        method: method.type,
+        description:
+          feeGhs > 0
+            ? `Withdrawal to ${method.accountName} · fee GHS ${feeGhs.toFixed(2)} (${rules.withdrawalFeePct}%) · payout GHS ${payoutGhs.toFixed(2)}`
+            : `Withdrawal to ${method.accountName}`,
+      })
+      .returning();
+    return { updated: debited, transaction: txn };
+  });
+
+  if (!result) {
     return res.status(400).json({ error: "Insufficient wallet balance" });
   }
-  const balanceAfter = balanceBefore - amount;
-
-  const [updated] = await db
-    .update(wallets)
-    .set({ balanceGhs: balanceAfter.toFixed(2), updatedAt: new Date() })
-    .where(eq(wallets.userId, userId))
-    .returning();
-
-  const [transaction] = await db
-    .insert(walletTransactions)
-    .values({
-      userId,
-      type: "withdrawal",
-      amountGhs: amount.toFixed(2),
-      balanceBeforeGhs: balanceBefore.toFixed(2),
-      balanceAfterGhs: balanceAfter.toFixed(2),
-      status: "pending",
-      method: method.type,
-      description: `Withdrawal to ${method.accountName}`,
-    })
-    .returning();
+  const { updated, transaction } = result;
 
   res.status(201).json({ wallet: updated, transaction });
 });
@@ -327,6 +339,42 @@ walletRouter.delete(
 
 // ============ MANUAL MOBILE MONEY DEPOSIT ============
 
+// Which deposit methods the admin has made visible; all enabled by default
+// until an admin saves a preference.
+walletRouter.get("/deposit-methods", requireAuth, async (_req, res) => {
+  try {
+    const [row] = await db.select().from(depositMethodSettings).limit(1);
+    res.json({
+      momo: row?.momoEnabled ?? true,
+      crypto: row?.cryptoEnabled ?? true,
+      chat: row?.chatEnabled ?? true,
+      binancePay: row?.binancePayEnabled ?? true,
+    });
+  } catch (error) {
+    console.error("Error fetching deposit methods:", error);
+    res.status(500).json({ error: "Failed to load deposit methods" });
+  }
+});
+
+// Active admin-registered Binance Pay IDs for the investor to choose from.
+walletRouter.get("/binance-pay-accounts", requireAuth, async (_req, res) => {
+  try {
+    const accounts = await db
+      .select({
+        id: binancePayAccounts.id,
+        binanceId: binancePayAccounts.binanceId,
+        label: binancePayAccounts.label,
+      })
+      .from(binancePayAccounts)
+      .where(eq(binancePayAccounts.isActive, true))
+      .orderBy(desc(binancePayAccounts.createdAt));
+    res.json({ accounts });
+  } catch (error) {
+    console.error("Error fetching Binance Pay accounts:", error);
+    res.status(500).json({ error: "Failed to load Binance Pay accounts" });
+  }
+});
+
 walletRouter.get("/deposit-settings", requireAuth, async (_req, res) => {
   const [settings] = await db
     .select({
@@ -382,7 +430,8 @@ walletRouter.post(
   },
 );
 
-const manualDepositSchema = z.object({
+const momoManualDepositSchema = z.object({
+  method: z.literal("momo").optional().default("momo"),
   reference: z.string().min(3).max(20),
   amountGhs: z.coerce.number().positive(),
   network: z.enum(["mtn", "vodafone", "telecel", "airteltigo"]),
@@ -391,30 +440,112 @@ const manualDepositSchema = z.object({
   screenshotUrl: z.string().url(),
 });
 
+const binanceManualDepositSchema = z.object({
+  method: z.literal("binance_pay"),
+  reference: z.string().min(3).max(20),
+  amountGhs: z.coerce.number().positive(),
+  binanceAccountId: z.string().uuid(),
+  senderBinanceId: z.string().trim().min(3).max(64),
+  senderEmail: z.string().trim().email().max(255),
+  senderName: z.string().min(2).max(255),
+  screenshotUrl: z.string().url(),
+});
+
 walletRouter.post(
   "/manual-deposits",
   requireAuth,
   async (req: AuthedRequest, res) => {
-    const parsed = manualDepositSchema.safeParse(req.body);
+    const isBinance = req.body?.method === "binance_pay";
+    const parsed = isBinance
+      ? binanceManualDepositSchema.safeParse(req.body)
+      : momoManualDepositSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: parsed.error.flatten() });
     }
-    const { reference, amountGhs, network, senderName, senderNumber, screenshotUrl } =
-      parsed.data;
+    const { reference, amountGhs, senderName, screenshotUrl } = parsed.data;
+
+    const [methodRow] = await db.select().from(depositMethodSettings).limit(1);
+    if (isBinance) {
+      if (methodRow && !methodRow.binancePayEnabled) {
+        return res.status(400).json({
+          error: "Binance Pay deposits are currently unavailable.",
+        });
+      }
+    } else if (methodRow && !methodRow.momoEnabled) {
+      return res.status(400).json({
+        error: "Mobile money deposits are currently unavailable.",
+      });
+    }
+
+    const rules = await getPaymentRules();
+    const minDeposit = isBinance ? rules.binanceMinDepositGhs : rules.momoMinDepositGhs;
+    const maxDeposit = isBinance ? rules.binanceMaxDepositGhs : rules.momoMaxDepositGhs;
+    if (minDeposit !== null && amountGhs < minDeposit) {
+      return res.status(400).json({
+        error: `Minimum deposit is GHS ${minDeposit.toFixed(2)}`,
+      });
+    }
+    if (maxDeposit !== null && amountGhs > maxDeposit) {
+      return res.status(400).json({
+        error: `Maximum deposit is GHS ${maxDeposit.toFixed(2)}`,
+      });
+    }
+
+    if (isBinance) {
+      const binanceData = parsed.data as z.infer<typeof binanceManualDepositSchema>;
+      const [account] = await db
+        .select()
+        .from(binancePayAccounts)
+        .where(
+          and(
+            eq(binancePayAccounts.id, binanceData.binanceAccountId),
+            eq(binancePayAccounts.isActive, true),
+          ),
+        )
+        .limit(1);
+      if (!account) {
+        return res.status(400).json({ error: "That Binance Pay account is no longer available." });
+      }
+    }
 
     try {
-      const [deposit] = await db
-        .insert(manualDeposits)
-        .values({
-          userId: req.user!.userId,
-          reference,
-          amountGhs: amountGhs.toFixed(2),
-          network,
-          senderName,
-          senderNumber,
-          screenshotUrl,
-        })
-        .returning();
+      const values = isBinance
+        ? {
+            userId: req.user!.userId,
+            method: "binance_pay" as const,
+            reference,
+            amountGhs: amountGhs.toFixed(2),
+            senderName,
+            binanceAccountId: (parsed.data as z.infer<typeof binanceManualDepositSchema>)
+              .binanceAccountId,
+            senderBinanceId: (parsed.data as z.infer<typeof binanceManualDepositSchema>)
+              .senderBinanceId,
+            senderEmail: (parsed.data as z.infer<typeof binanceManualDepositSchema>).senderEmail,
+            screenshotUrl,
+          }
+        : {
+            userId: req.user!.userId,
+            method: "momo" as const,
+            reference,
+            amountGhs: amountGhs.toFixed(2),
+            network: (parsed.data as z.infer<typeof momoManualDepositSchema>).network,
+            senderName,
+            senderNumber: (parsed.data as z.infer<typeof momoManualDepositSchema>).senderNumber,
+            screenshotUrl,
+          };
+
+      const [deposit] = await db.insert(manualDeposits).values(values).returning();
+
+      // Post the top-up request into the user's live chat thread so admins
+      // see it in the conversation and the user can track its status there.
+      await db.insert(chatMessages).values({
+        userId: req.user!.userId,
+        senderId: req.user!.userId,
+        senderRole: "user",
+        manualDepositId: deposit.id,
+        readByUser: true,
+      });
+
       res.status(201).json({ deposit });
     } catch (error: any) {
       if (error?.code === "23505") {
@@ -461,108 +592,82 @@ walletRouter.post(
     const userId = req.user!.userId;
 
     try {
-      // 1. Fetch pool with FOR UPDATE lock (prevents concurrent updates)
-      // Note: Drizzle doesn't have direct FOR UPDATE support yet, so we use raw SQL
-      const poolResult = await db.execute(
-        sql`SELECT * FROM reward_pools WHERE code = ${code} FOR UPDATE LIMIT 1`,
-      );
-
-      if (!poolResult || poolResult.length === 0) {
-        return res.status(404).json({
-          status: "pool_not_found",
-          message: "Reward code not found",
-        });
-      }
-
-      const pool = poolResult[0] as any;
-
-      // 2. Check pool status
-      if (pool.status !== "active") {
-        return res.status(400).json({
-          status: "pool_inactive",
-          message: "This reward pool is no longer active",
-        });
-      }
-
-      // 3. Check expiration (expiresAt includes time)
-      if (pool.expires_at && new Date() > new Date(pool.expires_at)) {
-        await db
-          .update(rewardPools)
-          .set({ status: "expired", updatedAt: new Date() })
-          .where(eq(rewardPools.id, pool.id));
-        return res.status(400).json({
-          status: "pool_expired",
-          message: "This reward pool has expired",
-        });
-      }
-
-      // 4. Check duplicate claims (if allowDuplicateClaims=false)
-      if (!pool.allow_duplicate_claims) {
-        const [existing] = await db
-          .select({ id: rewardClaims.id })
-          .from(rewardClaims)
-          .where(and(eq(rewardClaims.poolId, pool.id), eq(rewardClaims.userId, userId)))
-          .limit(1);
-
-        if (existing) {
-          return res.status(409).json({
-            status: "already_claimed",
-            message: "You have already claimed from this reward pool",
-          });
+      // Everything runs inside ONE transaction. The pool row is locked with
+      // SELECT ... FOR UPDATE *inside* the transaction, so concurrent claims
+      // for the same pool serialize: each sees the committed claimed total of
+      // the previous one, which prevents over-claiming past the pool and
+      // duplicate claims by the same user. The unique index on
+      // (pool_id, user_id) is a hard backstop for the no-duplicate rule.
+      const outcome = await db.transaction(async (tx) => {
+        const poolResult = await tx.execute(
+          sql`SELECT * FROM reward_pools WHERE code = ${code} FOR UPDATE LIMIT 1`,
+        );
+        if (!poolResult || poolResult.length === 0) {
+          return { http: 404, body: { status: "pool_not_found", message: "Reward code not found" } };
         }
-      }
+        const pool = poolResult[0] as any;
 
-      // 5. Calculate reward amount
-      let claimAmount: number;
-      if (pool.reward_type === "fixed") {
-        claimAmount = Number(pool.fixed_amount_ghs);
-      } else {
-        // random_range
-        const min = Number(pool.min_amount_ghs);
-        const max = Number(pool.max_amount_ghs);
-        claimAmount = Math.random() * (max - min) + min;
-      }
+        if (pool.status !== "active") {
+          return { http: 400, body: { status: "pool_inactive", message: "This reward pool is no longer active" } };
+        }
 
-      // 6. Check if pool has enough remaining
-      const claimed = Number(pool.claimed_pool_ghs);
-      const total = Number(pool.total_pool_ghs);
-      const remaining = total - claimed;
+        if (pool.expires_at && new Date() > new Date(pool.expires_at)) {
+          await tx
+            .update(rewardPools)
+            .set({ status: "expired", updatedAt: new Date() })
+            .where(eq(rewardPools.id, pool.id));
+          return { http: 400, body: { status: "pool_expired", message: "This reward pool has expired" } };
+        }
 
-      if (claimAmount > remaining) {
-        return res.status(400).json({
-          status: "insufficient_pool",
-          message: "Total reward amount claimed. Try again with the next provided code",
-        });
-      }
+        if (!pool.allow_duplicate_claims) {
+          const [existing] = await tx
+            .select({ id: rewardClaims.id })
+            .from(rewardClaims)
+            .where(and(eq(rewardClaims.poolId, pool.id), eq(rewardClaims.userId, userId)))
+            .limit(1);
+          if (existing) {
+            return { http: 409, body: { status: "already_claimed", message: "You have already claimed from this reward pool" } };
+          }
+        }
 
-      // 7. Check if this claim will exhaust the pool
-      const newClaimed = claimed + claimAmount;
-      const isExhausted = newClaimed >= total;
+        // Compute reward amount (guard against a misconfigured min>max range)
+        let claimAmount: number;
+        if (pool.reward_type === "fixed") {
+          claimAmount = Number(pool.fixed_amount_ghs);
+        } else {
+          const min = Number(pool.min_amount_ghs);
+          const max = Number(pool.max_amount_ghs);
+          const lo = Math.min(min, max);
+          const hi = Math.max(min, max);
+          claimAmount = Math.random() * (hi - lo) + lo;
+        }
+        claimAmount = Math.round(claimAmount * 100) / 100;
+        if (!(claimAmount > 0)) {
+          return { http: 400, body: { status: "insufficient_pool", message: "This reward pool is misconfigured" } };
+        }
 
-      // 8. Atomic transaction: wallet credit + claim record + pool update
-      await db.transaction(async (tx) => {
-        // Get or create wallet
-        const [wallet] =
-          (await tx
-            .insert(wallets)
-            .values({ userId })
-            .onConflictDoNothing()
-            .returning()) || [];
+        const claimed = Number(pool.claimed_pool_ghs);
+        const total = Number(pool.total_pool_ghs);
+        if (claimAmount > total - claimed) {
+          return { http: 400, body: { status: "insufficient_pool", message: "Total reward amount claimed. Try again with the next provided code" } };
+        }
 
-        const [currentWallet] = wallet
-          ? [wallet]
-          : await tx.select().from(wallets).where(eq(wallets.userId, userId)).limit(1);
+        const newClaimed = Math.round((claimed + claimAmount) * 100) / 100;
+        const isExhausted = newClaimed >= total;
 
-        const balanceBefore = Number(currentWallet.balanceGhs);
-        const balanceAfter = balanceBefore + claimAmount;
-
-        // Update wallet balance
-        await tx
+        // Credit wallet by atomic increment (create the row if missing)
+        await tx.insert(wallets).values({ userId }).onConflictDoNothing();
+        const [creditedWallet] = await tx
           .update(wallets)
-          .set({ balanceGhs: balanceAfter.toFixed(2), updatedAt: new Date() })
-          .where(eq(wallets.userId, userId));
+          .set({
+            balanceGhs: sql`${wallets.balanceGhs} + ${claimAmount.toFixed(2)}`,
+            updatedAt: new Date(),
+          })
+          .where(eq(wallets.userId, userId))
+          .returning();
+        const balanceAfter = Number(creditedWallet.balanceGhs);
+        const balanceBefore = Math.round((balanceAfter - claimAmount) * 100) / 100;
 
-        // Create wallet transaction
         const [txn] = await tx
           .insert(walletTransactions)
           .values({
@@ -577,7 +682,6 @@ walletRouter.post(
           })
           .returning();
 
-        // Create reward claim record
         await tx.insert(rewardClaims).values({
           poolId: pool.id,
           userId,
@@ -586,7 +690,7 @@ walletRouter.post(
           claimResult: "success",
         });
 
-        // Update pool
+        // Pool update guarded so we can never write past the total
         await tx
           .update(rewardPools)
           .set({
@@ -596,24 +700,27 @@ walletRouter.post(
           })
           .where(eq(rewardPools.id, pool.id));
 
-        // Log to audit trail
         await tx.insert(rewardPoolAudit).values({
           poolId: pool.id,
           action: "REWARD_CLAIMED",
-          changes: {
-            claimedAmount: claimAmount,
-            isExhausted,
-            userId,
-          },
+          changes: { claimedAmount: claimAmount, isExhausted, userId },
         });
+
+        return {
+          http: 200,
+          body: { status: "success", claimAmount, isPoolExhausted: isExhausted },
+        };
       });
 
-      res.json({
-        status: "success",
-        claimAmount,
-        isPoolExhausted: isExhausted,
-      });
-    } catch (error) {
+      res.status(outcome.http).json(outcome.body);
+    } catch (error: any) {
+      // Unique (pool_id, user_id) violation = concurrent duplicate claim
+      if (error?.code === "23505") {
+        return res.status(409).json({
+          status: "already_claimed",
+          message: "You have already claimed from this reward pool",
+        });
+      }
       console.error("Error claiming reward:", error);
       res.status(500).json({ error: "Failed to claim reward" });
     }
