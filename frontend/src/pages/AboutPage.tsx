@@ -31,11 +31,11 @@ export function AboutPage() {
         Back
       </button>
 
-      <div className="overflow-hidden rounded-2xl bg-gradient-to-br from-primary to-sky-600 p-6 text-white shadow-soft-lg">
+      <div className="relative overflow-hidden rounded-[2rem] bg-gradient-to-b from-brand-950 to-brand-800 p-6 text-white shadow-float">
         <div className="grid h-12 w-12 place-items-center rounded-2xl bg-white/15">
           <ShieldCheck size={24} />
         </div>
-        <h1 className="mt-3 text-2xl font-extrabold tracking-tight">
+        <h1 className="mt-3 font-display text-2xl font-bold tracking-tight">
           About AfriHome
         </h1>
         <p className="mt-1 text-sm text-white/70">

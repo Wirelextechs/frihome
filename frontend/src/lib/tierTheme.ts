@@ -1,23 +1,24 @@
-// Premium metallic finishes per package tier — mirrors physical card-tier
-// programs (graphite / bronze / silver / gold foil / platinum ...) rather
-// than playful gamified badges. `text: "light"` picks white type for darker
-// metals; `text: "dark"` picks near-black type for lighter/brighter ones.
+// AfriHome's housing ladder — each tier climbs one shade deeper into the
+// brand green, so the package list reads as an ascent from a light-mint
+// Studio up to a near-black Skyline. The top tier (Landmark) breaks the
+// scale with a gold foil finish. `text: "light"` picks white type for the
+// darker greens; `text: "dark"` picks near-black type for the light ones.
 export interface TierStyle {
   gradient: string;
   text: "light" | "dark";
 }
 
 export const TIER_STYLES: Record<string, TierStyle> = {
-  standard: { gradient: "from-neutral-700 via-neutral-600 to-neutral-800", text: "light" },
-  bronze: { gradient: "from-[#8a5a2b] via-[#c17f42] to-[#5c3a1e]", text: "light" },
-  silver: { gradient: "from-slate-300 via-zinc-100 to-slate-400", text: "dark" },
-  gold: { gradient: "from-[#bf953f] via-[#fcf6ba] to-[#aa771c]", text: "dark" },
-  platinum: { gradient: "from-slate-200 via-zinc-50 to-slate-300", text: "dark" },
-  diamond: { gradient: "from-sky-100 via-white to-cyan-100", text: "dark" },
-  master: { gradient: "from-violet-800 via-purple-600 to-violet-900", text: "light" },
-  grandmaster: { gradient: "from-fuchsia-800 via-pink-600 to-fuchsia-900", text: "light" },
-  challenger: { gradient: "from-orange-800 via-red-600 to-orange-900", text: "light" },
-  legend: { gradient: "from-yellow-600 via-amber-300 to-yellow-700", text: "dark" },
+  studio: { gradient: "from-brand-100 via-brand-50 to-brand-200", text: "dark" },
+  apartment: { gradient: "from-brand-200 via-brand-100 to-brand-300", text: "dark" },
+  townhouse: { gradient: "from-brand-300 via-brand-200 to-brand-400", text: "dark" },
+  duplex: { gradient: "from-brand-500 via-brand-400 to-brand-600", text: "light" },
+  villa: { gradient: "from-brand-600 via-brand-500 to-brand-700", text: "light" },
+  penthouse: { gradient: "from-brand-700 via-brand-600 to-brand-800", text: "light" },
+  estate: { gradient: "from-brand-800 via-brand-700 to-brand-900", text: "light" },
+  tower: { gradient: "from-brand-900 via-brand-800 to-brand-950", text: "light" },
+  skyline: { gradient: "from-brand-950 via-brand-900 to-black", text: "light" },
+  landmark: { gradient: "from-[#bf953f] via-[#fcf6ba] to-[#aa771c]", text: "dark" },
 };
 
 export const DEFAULT_TIER_STYLE: TierStyle = {

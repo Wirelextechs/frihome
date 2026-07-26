@@ -606,7 +606,7 @@ export function WalletPage() {
   return (
     <div className="space-y-5 py-2 animate-in fade-in-0 duration-300">
       <div>
-        <h1 className="text-2xl font-extrabold tracking-tight text-ink-900">
+        <h1 className="font-display text-2xl font-bold tracking-tight text-ink-900">
           Wallet
         </h1>
         <p className="mt-1 text-sm text-ink-500">
@@ -614,12 +614,13 @@ export function WalletPage() {
         </p>
       </div>
 
-      <div className="overflow-hidden rounded-2xl bg-gradient-to-br from-primary to-sky-600 p-5 text-white shadow-soft-lg">
-        <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-white/70">
-          <WalletIcon size={14} />
+      <div className="relative overflow-hidden rounded-[2rem] bg-gradient-to-b from-brand-950 to-brand-800 p-6 text-white shadow-float">
+        <span className="absolute -right-6 -top-8 h-32 w-32 rounded-full bg-primary/20 blur-2xl" />
+        <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-brand-300/80">
+          <WalletIcon size={13} />
           Available balance
         </p>
-        <p className="mt-1 text-3xl font-extrabold tracking-tight">
+        <p className="mt-2 font-display text-4xl font-bold tracking-tight">
           {formatCurrency(convertFromGhs(balance, currency), currency)}
         </p>
       </div>
@@ -969,7 +970,7 @@ export function WalletPage() {
       </Tabs>
 
       <div>
-        <h2 className="mb-3 text-sm font-bold text-ink-900">
+        <h2 className="mb-3 text-[11px] font-bold uppercase tracking-[0.18em] text-ink-400">
           Recent transactions
         </h2>
         {transactions.length === 0 ? (
@@ -1023,7 +1024,7 @@ export function WalletPage() {
                     <div className="grid h-14 w-14 place-items-center rounded-full bg-accent text-accent-foreground">
                       <Icon size={24} />
                     </div>
-                    <p className="text-2xl font-extrabold tracking-tight text-ink-900">
+                    <p className="font-display text-2xl font-bold tracking-tight text-ink-900">
                       {isCredit ? "+" : "-"}
                       {formatCurrency(
                         convertFromGhs(Number(selectedTx.amountGhs), currency),
@@ -1112,7 +1113,7 @@ export function WalletPage() {
                 <p className="text-xs font-medium uppercase tracking-wide text-ink-400">
                   Amount to send
                 </p>
-                <p className="mt-1 text-2xl font-extrabold tracking-tight text-ink-900">
+                <p className="mt-1 font-display text-2xl font-bold tracking-tight text-ink-900">
                   {cryptoInvoice.payAmount} {cryptoInvoice.payCurrency?.toUpperCase()}
                 </p>
               </div>

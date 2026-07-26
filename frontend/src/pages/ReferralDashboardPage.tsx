@@ -99,7 +99,7 @@ export function ReferralDashboardPage() {
   return (
     <div className="space-y-5 py-2 animate-in fade-in-0 duration-300">
       <div>
-        <h1 className="text-2xl font-extrabold tracking-tight text-ink-900">
+        <h1 className="font-display text-2xl font-bold tracking-tight text-ink-900">
           Refer & Earn
         </h1>
         <p className="mt-1 text-sm text-ink-500">
@@ -108,7 +108,7 @@ export function ReferralDashboardPage() {
         </p>
       </div>
 
-      <div className="overflow-hidden rounded-2xl bg-gradient-to-br from-primary to-sky-600 p-5 text-white shadow-soft-lg">
+      <div className="relative overflow-hidden rounded-[2rem] bg-gradient-to-b from-brand-950 to-brand-800 p-6 text-white shadow-float">
         <p className="text-xs font-medium uppercase tracking-wide text-white/70">
           Your referral code
         </p>

@@ -32,19 +32,23 @@ export function LoginPage() {
 
   return (
     <div className="pb-6">
-      <div className="-mx-4 -mt-16 rounded-b-[2rem] bg-gradient-to-br from-primary to-sky-600 px-4 pb-12 pt-24 text-center sm:-mx-6 sm:px-6">
-        <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-white/15 text-white">
-          <ShieldCheck size={26} />
-        </div>
-        <h1 className="mt-4 text-2xl font-extrabold tracking-tight text-white">
-          Welcome back
+      <div className="-mx-4 -mt-16 bg-gradient-to-b from-brand-950 via-brand-900 to-brand-800 px-6 pb-16 pt-24 sm:-mx-6">
+        <img
+          src="/logo-mark.png"
+          alt=""
+          className="h-12 w-12 rounded-2xl object-contain ring-2 ring-white/20"
+        />
+        <h1 className="mt-5 font-display text-3xl font-bold leading-tight text-white">
+          Welcome
+          <br />
+          home.
         </h1>
-        <p className="mt-1 text-sm text-white/50">
+        <p className="mt-2 text-sm text-brand-200/80">
           Log in to keep growing your portfolio.
         </p>
       </div>
 
-      <div className="relative -mt-6 rounded-2xl border border-border bg-card p-5 shadow-soft-lg">
+      <div className="relative -mt-8 rounded-[2rem] bg-card p-6 shadow-float">
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <Label htmlFor="phone">Phone number</Label>
@@ -74,12 +78,7 @@ export function LoginPage() {
             />
           </div>
 
-          <Button
-            type="submit"
-            size="lg"
-            disabled={loading}
-            className="w-full"
-          >
+          <Button type="submit" size="lg" disabled={loading} className="w-full">
             {loading ? "Logging in…" : "Log in"}
             {!loading && <ArrowRight size={16} />}
           </Button>
@@ -91,12 +90,14 @@ export function LoginPage() {
         </p>
       </div>
 
-      <p className="mt-5 text-center text-sm text-ink-500">
-        No account?{" "}
-        <Link to="/signup" className="font-semibold text-primary">
-          Sign up
-        </Link>
-      </p>
+      <Button
+        asChild
+        variant="tonal"
+        size="lg"
+        className="mt-4 w-full"
+      >
+        <Link to="/signup">New here? Create an account</Link>
+      </Button>
     </div>
   );
 }

@@ -1,19 +1,32 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useNavigate, useLocation } from "react-router-dom";
-import { Building2, Gift, Headphones, LayoutDashboard, LogOut, MessageCircle, PieChart, Settings } from "lucide-react";
+import {
+  Building2,
+  Gift,
+  Headphones,
+  Home,
+  LogOut,
+  MessageCircle,
+  PieChart,
+  Settings,
+  Wallet,
+} from "lucide-react";
 import { useAuthStore } from "../lib/store";
 import { api } from "../lib/api";
 import { AnnouncementOverlay } from "./AnnouncementOverlay";
 
-const TABS = [
-  { to: "/packages", label: "Packages", icon: Building2 },
-  { to: "/referrals", label: "Refer", icon: Gift },
+// Side tabs flank the raised center Invest button in the dock.
+const LEFT_TABS = [
+  { to: "/dashboard", label: "Home", icon: Home },
   { to: "/portfolio", label: "Portfolio", icon: PieChart },
-  { to: "/dashboard", label: "Home", icon: LayoutDashboard },
+];
+const RIGHT_TABS = [
+  { to: "/referrals", label: "Refer", icon: Gift },
+  { to: "/wallet", label: "Wallet", icon: Wallet },
 ];
 
-// Pages that render a full-bleed blue hero behind the header — the header
-// goes transparent and switches to white content on these.
+// Pages that open with a deep forest hero behind the header — the header goes
+// transparent with light content on these.
 const HERO_ROUTES = new Set(["/dashboard", "/login", "/signup"]);
 
 export function Layout() {
@@ -74,41 +87,84 @@ export function Layout() {
     navigate("/login");
   }
 
-  const iconBtn = onHero
-    ? "border-white/25 text-white hover:bg-white/15"
-    : "border-border text-ink-500 hover:border-primary/20 hover:bg-primary/10 hover:text-primary";
+  const initials = (user?.fullName ?? "")
+    .split(/\s+/)
+    .map((w) => w[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+
+  const actionBtn = onHero
+    ? "bg-white/10 text-white hover:bg-white/20"
+    : "bg-white text-ink-500 shadow-soft hover:text-brand-700";
 
   return (
     <div className="min-h-[100dvh] bg-background">
       <header
         className={`safe-top fixed inset-x-0 top-0 z-30 transition-colors ${
-          onHero
-            ? "bg-primary"
-            : "border-b border-border/70 bg-background/80 backdrop-blur-md"
+          onHero ? "bg-transparent" : "bg-background/85 backdrop-blur-lg"
         }`}
       >
-        <div className="mx-auto flex w-full max-w-sm items-center justify-between px-4 py-3.5 sm:px-6">
-          <Link to={user ? "/dashboard" : "/"} className="flex items-center gap-2 active:scale-95 transition">
-            <img src="/logo-mark.png" alt="AfriHome" className="h-8 w-8 rounded-lg object-contain" />
-            <span
-              className={`text-base font-bold tracking-tight ${
-                onHero ? "text-white" : "text-ink-900"
-              }`}
-            >
-              AfriHome
-            </span>
-          </Link>
+        <div className="mx-auto flex w-full max-w-sm items-center justify-between px-4 py-3 sm:px-6">
           {user ? (
-            <div className="flex items-center gap-2">
+            <Link
+              to="/dashboard"
+              className="flex items-center gap-2.5 active:scale-95 transition"
+            >
+              <span
+                className={`grid h-10 w-10 place-items-center rounded-2xl font-display text-sm font-bold ${
+                  onHero
+                    ? "bg-white/15 text-white"
+                    : "bg-brand-950 text-white shadow-soft"
+                }`}
+              >
+                {initials || "A"}
+              </span>
+              <span className="leading-tight">
+                <span
+                  className={`block text-[11px] font-semibold uppercase tracking-widest ${
+                    onHero ? "text-white/60" : "text-ink-400"
+                  }`}
+                >
+                  AfriHome
+                </span>
+                <span
+                  className={`block max-w-[9rem] truncate text-sm font-bold ${
+                    onHero ? "text-white" : "text-ink-900"
+                  }`}
+                >
+                  {user.fullName.split(" ")[0]}
+                </span>
+              </span>
+            </Link>
+          ) : (
+            <Link to="/" className="flex items-center gap-2 active:scale-95 transition">
+              <img
+                src="/logo-mark.png"
+                alt="AfriHome"
+                className="h-9 w-9 rounded-xl object-contain"
+              />
+              <span
+                className={`font-display text-base font-bold tracking-tight ${
+                  onHero ? "text-white" : "text-ink-900"
+                }`}
+              >
+                AfriHome
+              </span>
+            </Link>
+          )}
+
+          {user ? (
+            <div className="flex items-center gap-1.5">
               <Link
                 to="/chat"
-                className={`relative grid h-9 w-9 place-items-center rounded-full border transition active:scale-95 ${iconBtn}`}
+                className={`relative grid h-10 w-10 place-items-center rounded-2xl transition active:scale-95 ${actionBtn}`}
                 aria-label="Live chat"
                 title="Live Chat"
               >
-                <MessageCircle size={16} />
+                <MessageCircle size={17} />
                 {chatUnread > 0 && (
-                  <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+                  <span className="absolute -right-0.5 -top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
                     {chatUnread > 9 ? "9+" : chatUnread}
                   </span>
                 )}
@@ -116,36 +172,36 @@ export function Layout() {
               {hasSupport && (
                 <Link
                   to="/support"
-                  className={`grid h-9 w-9 place-items-center rounded-full border transition active:scale-95 ${iconBtn}`}
+                  className={`grid h-10 w-10 place-items-center rounded-2xl transition active:scale-95 ${actionBtn}`}
                   aria-label="Support"
                   title="Support"
                 >
-                  <Headphones size={16} />
+                  <Headphones size={17} />
                 </Link>
               )}
               {user.role === "admin" && (
                 <Link
                   to="/admin"
-                  className={`grid h-9 w-9 place-items-center rounded-full border transition active:scale-95 ${iconBtn}`}
+                  className={`grid h-10 w-10 place-items-center rounded-2xl transition active:scale-95 ${actionBtn}`}
                   aria-label="Admin panel"
                   title="Admin Panel"
                 >
-                  <Settings size={16} />
+                  <Settings size={17} />
                 </Link>
               )}
               <button
                 onClick={handleLogout}
-                className={`grid h-9 w-9 place-items-center rounded-full border transition active:scale-95 ${iconBtn}`}
+                className={`grid h-10 w-10 place-items-center rounded-2xl transition active:scale-95 ${actionBtn}`}
                 aria-label="Log out"
               >
-                <LogOut size={16} />
+                <LogOut size={17} />
               </button>
             </div>
           ) : (
             <div className="flex items-center gap-2">
               <Link
                 to="/login"
-                className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${
+                className={`rounded-full px-3.5 py-2 text-sm font-bold transition ${
                   onHero ? "text-white/90 hover:text-white" : "text-ink-600 hover:text-ink-900"
                 }`}
               >
@@ -153,10 +209,10 @@ export function Layout() {
               </Link>
               <Link
                 to="/signup"
-                className={`rounded-full px-4 py-1.5 text-sm font-semibold transition active:scale-95 ${
+                className={`rounded-full px-4 py-2 text-sm font-bold transition active:scale-95 ${
                   onHero
-                    ? "bg-white text-primary hover:bg-white/90"
-                    : "bg-ink-900 text-white hover:bg-ink-800"
+                    ? "bg-white text-brand-900 hover:bg-white/90"
+                    : "bg-brand-950 text-white shadow-soft hover:bg-brand-900"
                 }`}
               >
                 Sign up
@@ -166,34 +222,81 @@ export function Layout() {
         </div>
       </header>
 
-      <main className={`mx-auto w-full max-w-sm px-4 pt-16 sm:px-6 ${user ? "pb-28" : "pb-8"}`}>
+      <main
+        className={`mx-auto w-full max-w-sm px-4 pt-16 sm:px-6 ${user ? "pb-32" : "pb-8"}`}
+      >
         <Outlet />
       </main>
 
       <AnnouncementOverlay />
 
       {user && (
-        <nav className="safe-bottom fixed inset-x-0 bottom-0 z-20 px-4 pb-3">
-          <div className="mx-auto flex w-full max-w-sm items-center justify-around gap-1 rounded-2xl border border-border/70 bg-card/90 p-1.5 shadow-soft-lg backdrop-blur-md">
-            {TABS.map(({ to, label, icon: Icon }) => (
-              <NavLink
-                key={to}
-                to={to}
-                className={({ isActive }) =>
-                  `flex flex-1 flex-col items-center gap-0.5 rounded-xl px-2 py-2 text-[11px] font-semibold transition active:scale-95 ${
-                    isActive
-                      ? "bg-primary text-primary-foreground shadow-soft"
-                      : "text-ink-400 hover:text-ink-600"
-                  }`
-                }
-              >
-                <Icon size={19} strokeWidth={2.25} />
-                {label}
-              </NavLink>
+        <nav className="safe-bottom fixed inset-x-0 bottom-0 z-20 px-6 pb-4">
+          <div className="relative mx-auto flex w-full max-w-sm items-end justify-between rounded-[1.75rem] bg-brand-950/95 px-3 pb-2 pt-2 shadow-float backdrop-blur-md">
+            {LEFT_TABS.map(({ to, label, icon: Icon }) => (
+              <DockTab key={to} to={to} label={label} icon={Icon} />
+            ))}
+
+            {/* Raised center action — Invest */}
+            <NavLink
+              to="/packages"
+              aria-label="Invest"
+              className={({ isActive }) =>
+                `relative -top-5 grid h-14 w-14 shrink-0 place-items-center rounded-full transition active:scale-95 ${
+                  isActive
+                    ? "bg-primary text-white shadow-float ring-4 ring-background"
+                    : "bg-white text-brand-950 shadow-float ring-4 ring-background"
+                }`
+              }
+            >
+              <Building2 size={22} strokeWidth={2.25} />
+            </NavLink>
+
+            {RIGHT_TABS.map(({ to, label, icon: Icon }) => (
+              <DockTab key={to} to={to} label={label} icon={Icon} />
             ))}
           </div>
         </nav>
       )}
     </div>
+  );
+}
+
+function DockTab({
+  to,
+  label,
+  icon: Icon,
+}: {
+  to: string;
+  label: string;
+  icon: typeof Home;
+}) {
+  return (
+    <NavLink
+      to={to}
+      className={({ isActive }) =>
+        `flex w-14 flex-col items-center gap-1 rounded-2xl py-1.5 transition active:scale-95 ${
+          isActive ? "text-white" : "text-white/45 hover:text-white/75"
+        }`
+      }
+    >
+      {({ isActive }) => (
+        <>
+          <Icon size={20} strokeWidth={isActive ? 2.5 : 2} />
+          <span
+            className={`text-[10px] font-bold leading-none ${
+              isActive ? "opacity-100" : "opacity-0"
+            }`}
+          >
+            {label}
+          </span>
+          <span
+            className={`h-1 w-1 rounded-full bg-primary transition-opacity ${
+              isActive ? "opacity-100" : "opacity-0"
+            }`}
+          />
+        </>
+      )}
+    </NavLink>
   );
 }
