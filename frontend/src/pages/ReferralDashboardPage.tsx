@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Copy, Gift, ShieldAlert, Share2, Users } from "lucide-react";
+import { Copy, ShieldAlert, Share2, TrendingUp, Users } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
 import { useAuthStore } from "../lib/store";
@@ -39,6 +39,15 @@ interface Reward {
   rewardAmountGhs: string;
   createdAt: string;
   refereeFullName: string;
+}
+
+function initialsOf(name: string) {
+  return name
+    .split(/\s+/)
+    .map((w) => w[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
 }
 
 export function ReferralDashboardPage() {
@@ -90,40 +99,43 @@ export function ReferralDashboardPage() {
     return (
       <div className="space-y-4 py-2">
         <Skeleton className="h-8 w-40 rounded-lg" />
-        <Skeleton className="h-28 rounded-2xl" />
+        <Skeleton className="h-40 rounded-[2rem]" />
         <Skeleton className="h-24 rounded-2xl" />
       </div>
     );
   }
 
   return (
-    <div className="space-y-5 py-2 animate-in fade-in-0 duration-300">
+    <div className="space-y-6 py-2 animate-in fade-in-0 duration-300">
       <div>
         <h1 className="font-display text-2xl font-bold tracking-tight text-ink-900">
           Refer & Earn
         </h1>
         <p className="mt-1 text-sm text-ink-500">
-          Earn a reward when people you refer invest — and when their
-          referrals invest too, up to 3 levels deep.
+          Earn a reward when people you refer invest — up to 3 levels deep.
         </p>
       </div>
 
-      <div className="relative overflow-hidden rounded-[2rem] bg-gradient-to-b from-brand-950 to-brand-800 p-6 text-white shadow-float">
-        <p className="text-xs font-medium uppercase tracking-wide text-white/70">
+      {/* Referral code hero */}
+      <div className="relative overflow-hidden rounded-[2rem] bg-gradient-to-b from-brand-950 via-brand-900 to-brand-800 p-6 text-white shadow-float">
+        <span className="pointer-events-none absolute -right-8 -top-10 h-36 w-36 rounded-full bg-primary/25 blur-3xl" />
+        <p className="relative text-[11px] font-bold uppercase tracking-[0.2em] text-brand-300/80">
           Your referral code
         </p>
-        <p className="mt-1 text-3xl font-extrabold tracking-widest">{code}</p>
-        <div className="mt-4 flex gap-2">
+        <p className="relative mt-2 flex items-baseline gap-2 font-display text-[2rem] font-bold tracking-[0.15em]">
+          {code}
+        </p>
+        <div className="relative mt-5 flex gap-2">
           <button
             onClick={copyCode}
-            className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-white/15 py-2.5 text-sm font-semibold transition active:scale-95 hover:bg-white/25"
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-full bg-white/10 py-3 text-sm font-bold transition active:scale-[0.97] hover:bg-white/[0.18]"
           >
             <Copy size={15} />
             Copy code
           </button>
           <button
             onClick={copyLink}
-            className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-white py-2.5 text-sm font-semibold text-primary transition active:scale-95 hover:bg-white/90"
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-full bg-white py-3 text-sm font-bold text-brand-950 transition active:scale-[0.97] hover:bg-white/90"
           >
             <Share2 size={15} />
             Share link
@@ -131,42 +143,49 @@ export function ReferralDashboardPage() {
         </div>
       </div>
 
-      <Card className="p-4">
+      {/* Level ladder */}
+      <Card className="p-5">
         <p className="text-sm font-bold text-ink-900">How rewards work</p>
-        <p className="mt-1 text-xs text-ink-500">
-          When someone in your referral chain invests, you earn a percentage
-          of their investment — credited to your wallet instantly. Deposits
-          and withdrawals never trigger a reward, only real investments.
+        <p className="mt-1 text-xs leading-relaxed text-ink-500">
+          When someone in your chain invests, you earn a percentage of their
+          investment, credited to your wallet instantly. Deposits and
+          withdrawals never trigger a reward.
         </p>
-        <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+        <div className="mt-4 space-y-2">
           {[1, 2, 3].map((level) => (
-            <div key={level} className="rounded-xl bg-ink-50 p-2.5">
-              <p className="text-[10px] font-semibold uppercase text-ink-400">
-                Level {level}
-              </p>
-              <p className="mt-1 text-lg font-extrabold text-primary">
+            <div
+              key={level}
+              className="flex items-center gap-3 rounded-2xl bg-ink-50 px-4 py-3"
+            >
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white font-display text-sm font-bold text-brand-700 shadow-soft">
+                L{level}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold text-ink-700">
+                  {level === 1
+                    ? "People you refer"
+                    : level === 2
+                      ? "Their referrals"
+                      : "Their referrals' referrals"}
+                </p>
+              </div>
+              <span className="shrink-0 font-display text-lg font-bold text-primary">
                 {pctForLevel(level)}%
-              </p>
-              <p className="text-[10px] text-ink-400">
-                {level === 1
-                  ? "people you refer"
-                  : level === 2
-                    ? "their referrals"
-                    : "their referrals' referrals"}
-              </p>
+              </span>
             </div>
           ))}
         </div>
       </Card>
 
-      <Card className="border-amber-200 bg-amber-50 p-4">
-        <div className="flex items-center gap-1.5">
-          <ShieldAlert size={15} className="text-amber-700" />
+      {/* Rules */}
+      <Card className="border-2 border-amber-200 bg-amber-50 p-5">
+        <div className="flex items-center gap-2">
+          <ShieldAlert size={16} className="text-amber-700" />
           <p className="text-sm font-bold text-amber-900">
             Rules & prohibited activity
           </p>
         </div>
-        <ul className="mt-2 space-y-1.5 text-xs text-amber-800">
+        <ul className="mt-3 space-y-2 text-xs leading-relaxed text-amber-800">
           <li>
             • Referring yourself — using your own code, or signing up
             duplicate/fake accounts to farm rewards — is prohibited.
@@ -182,7 +201,7 @@ export function ReferralDashboardPage() {
             prohibited.
           </li>
         </ul>
-        <p className="mt-2 text-xs font-semibold text-amber-900">
+        <p className="mt-3 border-t border-amber-200/70 pt-3 text-xs font-semibold text-amber-900">
           Consequences: rewards obtained through violations will be
           reversed, pending rewards forfeited, and the account(s) involved
           may be suspended or permanently banned. Serious or repeated abuse
@@ -191,20 +210,25 @@ export function ReferralDashboardPage() {
         </p>
       </Card>
 
-      <Card className="p-4">
-        <p className="text-xs font-medium uppercase tracking-wide text-ink-400">
+      {/* Total earned */}
+      <div className="relative overflow-hidden rounded-[2rem] bg-brand-950 p-6 text-white shadow-float">
+        <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.2em] text-brand-300/80">
+          <TrendingUp size={13} />
           Total earned
         </p>
-        <p className="mt-1 text-2xl font-extrabold text-ink-900">
-          {formatCurrency(convertFromGhs(Number(stats?.totalEarningsGhs ?? 0), currency), currency)}
+        <p className="mt-2 font-display text-3xl font-bold tracking-tight">
+          {formatCurrency(
+            convertFromGhs(Number(stats?.totalEarningsGhs ?? 0), currency),
+            currency,
+          )}
         </p>
-        <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+        <div className="mt-5 grid grid-cols-3 gap-2">
           {[1, 2, 3].map((level) => (
-            <div key={level} className="rounded-xl bg-ink-50 p-2.5">
-              <p className="text-[10px] font-semibold uppercase text-ink-400">
+            <div key={level} className="rounded-2xl bg-white/[0.08] p-3 backdrop-blur-sm">
+              <p className="text-[10px] font-semibold uppercase text-white/50">
                 Level {level}
               </p>
-              <p className="mt-1 text-sm font-bold text-ink-900">
+              <p className="mt-1 text-sm font-bold">
                 {formatCurrency(
                   convertFromGhs(
                     Number(stats?.[`level${level}EarningsGhs` as keyof Stats] ?? 0),
@@ -213,28 +237,35 @@ export function ReferralDashboardPage() {
                   currency,
                 )}
               </p>
-              <p className="text-[10px] text-ink-400">
+              <p className="text-[10px] text-white/40">
                 {stats?.[`level${level}Count` as keyof Stats]} referrals
               </p>
             </div>
           ))}
         </div>
-      </Card>
+      </div>
 
-      <div>
+      {/* Direct referrals */}
+      <section>
         <h2 className="mb-3 flex items-center gap-1.5 text-sm font-bold text-ink-900">
           <Users size={15} />
           Your direct referrals ({referees.length})
         </h2>
         {referees.length === 0 ? (
-          <p className="text-sm text-ink-400">
-            Share your code to start earning rewards.
-          </p>
+          <Card className="flex flex-col items-center gap-1 p-6 text-center">
+            <Users size={20} className="text-ink-300" />
+            <p className="text-sm text-ink-400">
+              Share your code to start earning rewards.
+            </p>
+          </Card>
         ) : (
           <div className="space-y-2">
             {referees.map((r) => (
-              <Card key={r.userId} className="flex items-center justify-between px-4 py-3">
-                <div className="min-w-0">
+              <Card key={r.userId} className="flex items-center gap-3 px-4 py-3">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent text-xs font-bold text-accent-foreground">
+                  {initialsOf(r.fullName)}
+                </span>
+                <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-ink-900">
                     {r.fullName}
                   </p>
@@ -253,38 +284,50 @@ export function ReferralDashboardPage() {
             ))}
           </div>
         )}
-      </div>
+      </section>
 
-      <div>
+      {/* Reward history */}
+      <section>
         <h2 className="mb-3 flex items-center gap-1.5 text-sm font-bold text-ink-900">
-          <Gift size={15} />
+          <TrendingUp size={15} />
           Reward history
         </h2>
         {rewards.length === 0 ? (
-          <p className="text-sm text-ink-400">No rewards earned yet.</p>
+          <Card className="flex flex-col items-center gap-1 p-6 text-center">
+            <TrendingUp size={20} className="text-ink-300" />
+            <p className="text-sm text-ink-400">No rewards earned yet.</p>
+          </Card>
         ) : (
           <div className="space-y-2">
             {rewards.map((r) => (
-              <Card key={r.id} className="flex items-center justify-between px-4 py-3">
-                <div>
+              <Card key={r.id} className="flex items-center gap-3 px-4 py-3">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent text-accent-foreground">
+                  <TrendingUp size={16} />
+                </span>
+                <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold text-ink-900">
+                    {r.refereeFullName}
+                  </p>
+                  <p className="truncate text-xs text-ink-400">
+                    Level {r.level} · {r.rewardPercentage}%
+                  </p>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p className="text-sm font-bold text-primary">
                     +{formatCurrency(
                       convertFromGhs(Number(r.rewardAmountGhs), currency),
                       currency,
                     )}
                   </p>
-                  <p className="text-xs text-ink-400">
-                    Level {r.level} · {r.refereeFullName} · {r.rewardPercentage}%
+                  <p className="text-[10px] text-ink-400">
+                    {new Date(r.createdAt).toLocaleDateString()}
                   </p>
                 </div>
-                <p className="shrink-0 text-xs text-ink-400">
-                  {new Date(r.createdAt).toLocaleDateString()}
-                </p>
               </Card>
             ))}
           </div>
         )}
-      </div>
+      </section>
     </div>
   );
 }

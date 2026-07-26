@@ -1,12 +1,14 @@
 import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
+  BadgeCheck,
   Building2,
+  CheckCircle2,
   Coins,
   Gem,
   LineChart,
   ShieldCheck,
-  TrendingUp,
+  Star,
   Wallet,
 } from "lucide-react";
 import { Card } from "../components/ui/card";
@@ -18,11 +20,37 @@ const ACTIVITIES = [
   { icon: Gem, label: "Jewelry trade" },
 ];
 
+const OFFER_ITEMS = [
+  "Packages for every budget, from entry-level to premium.",
+  "A fixed return over a set number of days.",
+  "Daily payouts credited to your wallet, so you watch your money grow and withdraw as you earn.",
+];
+
+const HOW_IT_WORKS = [
+  "Your capital is deployed across a diversified mix of markets.",
+  "The profits from those activities are what fund your returns.",
+  "Spreading funds across several markets means no single bad day decides your outcome.",
+];
+
+const SAFETY_NET = [
+  "Markets move, some days in our favour and some against us.",
+  "We keep a dedicated reserve fund for the days a market turns against us.",
+  "The reserve cushions the impact so your daily payouts stay steady through the rough patches.",
+  "We carry the risk so you do not have to.",
+];
+
+const NOT_A_PONZI = [
+  "We do not pay old members with new members' deposits.",
+  "Your returns come from genuine trading and asset activity.",
+  "Real operations back our books, and your withdrawals are yours to make.",
+  "Transparency is the whole point.",
+];
+
 export function AboutPage() {
   const navigate = useNavigate();
 
   return (
-    <div className="space-y-5 py-2 animate-in fade-in-0 duration-300">
+    <div className="space-y-6 py-2 animate-in fade-in-0 duration-300">
       <button
         onClick={() => navigate(-1)}
         className="flex items-center gap-1.5 text-sm font-medium text-ink-500 transition hover:text-ink-900 active:scale-95"
@@ -31,116 +59,134 @@ export function AboutPage() {
         Back
       </button>
 
-      <div className="relative overflow-hidden rounded-[2rem] bg-gradient-to-b from-brand-950 to-brand-800 p-6 text-white shadow-float">
-        <div className="grid h-12 w-12 place-items-center rounded-2xl bg-white/15">
-          <ShieldCheck size={24} />
+      {/* Hero */}
+      <div className="relative overflow-hidden rounded-[2rem] bg-gradient-to-b from-brand-950 via-brand-900 to-brand-800 p-6 text-white shadow-float">
+        <span className="pointer-events-none absolute -right-10 -top-14 h-40 w-40 rounded-full bg-primary/25 blur-3xl" />
+        <div className="relative">
+          <div className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-[11px] font-bold uppercase tracking-widest text-brand-200">
+            <BadgeCheck size={13} />
+            Verified operator
+          </div>
+          <h1 className="mt-4 font-display text-[1.75rem] font-bold leading-tight tracking-tight">
+            A real investment
+            <br />
+            platform. Not a game.
+          </h1>
+          <p className="mt-2 max-w-[26ch] text-sm text-white/70">
+            We pool member capital and put it to work across real,
+            income-generating markets.
+          </p>
         </div>
-        <h1 className="mt-3 font-display text-2xl font-bold tracking-tight">
-          About AfriHome
-        </h1>
-        <p className="mt-1 text-sm text-white/70">
-          A real investment platform, not a game of chance.
-        </p>
-      </div>
 
-      <Card className="p-5">
-        <h2 className="text-sm font-bold uppercase tracking-wide text-ink-400">
-          Who we are
-        </h2>
-        <p className="mt-2 text-sm leading-relaxed text-ink-600">
-          AfriHome is a team that pools members' funds and puts them to work in
-          real, income-generating markets. Real operations run by real people,
-          not paper promises.
-        </p>
-        <div className="mt-4 grid grid-cols-2 gap-2">
+        {/* Trust strip */}
+        <div className="relative mt-6 grid grid-cols-4 gap-2 border-t border-white/10 pt-4">
           {ACTIVITIES.map(({ icon: Icon, label }) => (
-            <div
-              key={label}
-              className="flex items-center gap-2 rounded-xl bg-ink-50 px-3 py-2.5"
-            >
-              <Icon size={16} className="text-primary" />
-              <span className="text-xs font-semibold text-ink-700">{label}</span>
+            <div key={label} className="flex flex-col items-center gap-1.5 text-center">
+              <div className="grid h-9 w-9 place-items-center rounded-xl bg-white/10">
+                <Icon size={16} />
+              </div>
+              <span className="text-[10px] font-semibold leading-tight text-white/70">
+                {label}
+              </span>
             </div>
           ))}
         </div>
-      </Card>
+      </div>
 
-      <Card className="p-5">
-        <div className="flex items-center gap-2">
-          <Wallet size={18} className="text-primary" />
+      {/* Who we are */}
+      <div>
+        <p className="text-sm leading-relaxed text-ink-600">
+          AfriHome is a team that pools members' funds and puts them to work
+          in real, income-generating markets. Real operations run by real
+          people, not paper promises.
+        </p>
+      </div>
+
+      {/* What we offer — feature grid */}
+      <section>
+        <div className="mb-3 flex items-center gap-2">
+          <Wallet size={16} className="text-primary" />
           <h2 className="text-sm font-bold text-ink-900">What we offer you</h2>
         </div>
-        <ul className="mt-2 space-y-1.5 text-sm text-ink-600">
-          <li>• Packages for every budget, from entry-level to premium.</li>
-          <li>• A fixed return over a set number of days.</li>
-          <li>
-            • Daily payouts credited to your wallet, so you watch your money grow
-            and withdraw as you earn.
-          </li>
-        </ul>
-      </Card>
-
-      <Card className="p-5">
-        <div className="flex items-center gap-2">
-          <TrendingUp size={18} className="text-primary" />
-          <h2 className="text-sm font-bold text-ink-900">How we use your money</h2>
+        <div className="space-y-2.5">
+          {OFFER_ITEMS.map((item, i) => (
+            <Card key={i} className="flex items-start gap-3 p-4">
+              <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-accent text-xs font-bold text-accent-foreground">
+                {i + 1}
+              </span>
+              <p className="text-sm leading-relaxed text-ink-700">{item}</p>
+            </Card>
+          ))}
         </div>
-        <ul className="mt-2 space-y-1.5 text-sm text-ink-600">
-          <li>• Your capital is deployed across a diversified mix of markets.</li>
-          <li>• The profits from those activities are what fund your returns.</li>
-          <li>
-            • Spreading funds across several markets means no single bad day
-            decides your outcome.
-          </li>
-        </ul>
-      </Card>
+      </section>
 
-      <Card className="border-primary/20 bg-primary/5 p-5">
-        <div className="flex items-center gap-2">
-          <ShieldCheck size={18} className="text-primary" />
-          <h2 className="text-sm font-bold text-ink-900">Our safety net</h2>
+      {/* How we use your money */}
+      <section>
+        <div className="mb-3 flex items-center gap-2">
+          <LineChart size={16} className="text-primary" />
+          <h2 className="text-sm font-bold text-ink-900">
+            How we use your money
+          </h2>
         </div>
-        <ul className="mt-2 space-y-1.5 text-sm text-ink-700">
-          <li>• Markets move, some days in our favour and some against us.</li>
-          <li>
-            • We keep a dedicated reserve fund for the days a market turns
-            against us.
-          </li>
-          <li>
-            • The reserve cushions the impact so your daily payouts stay steady
-            through the rough patches.
-          </li>
-          <li>• We carry the risk so you do not have to.</li>
-        </ul>
-      </Card>
+        <Card className="divide-y divide-border p-0">
+          {HOW_IT_WORKS.map((item, i) => (
+            <div key={i} className="flex items-start gap-3 px-4 py-3.5">
+              <span className="mt-0.5 shrink-0 font-display text-xs font-bold text-ink-300">
+                0{i + 1}
+              </span>
+              <p className="text-sm leading-relaxed text-ink-700">{item}</p>
+            </div>
+          ))}
+        </Card>
+      </section>
 
-      <Card className="p-5">
-        <h2 className="text-sm font-bold text-ink-900">
+      {/* Safety net — highlighted callout */}
+      <section className="relative overflow-hidden rounded-3xl bg-accent p-5">
+        <div className="flex items-center gap-2">
+          <ShieldCheck size={18} className="text-accent-foreground" />
+          <h2 className="text-sm font-bold text-accent-foreground">
+            Our safety net
+          </h2>
+        </div>
+        <ul className="mt-3 space-y-2">
+          {SAFETY_NET.map((item, i) => (
+            <li key={i} className="flex items-start gap-2 text-sm text-accent-foreground/90">
+              <CheckCircle2 size={15} className="mt-0.5 shrink-0" />
+              <span className="leading-relaxed">{item}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      {/* Why not a Ponzi */}
+      <section>
+        <h2 className="mb-3 text-sm font-bold text-ink-900">
           Why we are not a Ponzi scheme
         </h2>
-        <ul className="mt-2 space-y-1.5 text-sm text-ink-600">
-          <li>• We do not pay old members with new members' deposits.</li>
-          <li>• Your returns come from genuine trading and asset activity.</li>
-          <li>
-            • Real operations back our books, and your withdrawals are yours to
-            make.
-          </li>
-          <li>• Transparency is the whole point.</li>
-        </ul>
-      </Card>
+        <div className="grid grid-cols-1 gap-2.5">
+          {NOT_A_PONZI.map((item, i) => (
+            <Card key={i} className="flex items-start gap-3 p-4">
+              <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-primary" />
+              <p className="text-sm leading-relaxed text-ink-700">{item}</p>
+            </Card>
+          ))}
+        </div>
+      </section>
 
-      <Card className="p-5">
-        <h2 className="text-sm font-bold text-ink-900">
-          An honest word before you start
-        </h2>
-        <p className="mt-2 text-sm leading-relaxed text-ink-600">
+      {/* Closing statement */}
+      <div className="rounded-3xl border-2 border-dashed border-brand-950/15 p-5 text-center">
+        <Star size={20} className="mx-auto text-primary" />
+        <p className="mt-3 text-sm leading-relaxed text-ink-600">
           If you want a "double your money overnight" or get-rich-tomorrow
-          scheme, AfriHome is not that, and we would rather you look elsewhere.
-          But if you want steady, disciplined, real-world growth from a team that
-          treats your money seriously, you are in the right place.
+          scheme, AfriHome is not that, and we would rather you look
+          elsewhere. But if you want steady, disciplined, real-world growth
+          from a team that treats your money seriously, you are in the right
+          place.
         </p>
-        <p className="mt-3 text-sm font-semibold text-primary">Welcome aboard.</p>
-      </Card>
+        <p className="mt-4 font-display text-base font-bold text-primary">
+          Welcome aboard.
+        </p>
+      </div>
     </div>
   );
 }

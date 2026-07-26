@@ -2,13 +2,13 @@ import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useNavigate, useLocation } from "react-router-dom";
 import {
   Building2,
-  Gift,
   Headphones,
   Home,
   LogOut,
   MessageCircle,
   PieChart,
   Settings,
+  Users,
   Wallet,
 } from "lucide-react";
 import { useAuthStore } from "../lib/store";
@@ -21,7 +21,7 @@ const LEFT_TABS = [
   { to: "/portfolio", label: "Portfolio", icon: PieChart },
 ];
 const RIGHT_TABS = [
-  { to: "/referrals", label: "Refer", icon: Gift },
+  { to: "/referrals", label: "Refer", icon: Users },
   { to: "/wallet", label: "Wallet", icon: Wallet },
 ];
 
@@ -87,13 +87,6 @@ export function Layout() {
     navigate("/login");
   }
 
-  const initials = (user?.fullName ?? "")
-    .split(/\s+/)
-    .map((w) => w[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
-
   const actionBtn = onHero
     ? "bg-white/10 text-white hover:bg-white/20"
     : "bg-white text-ink-500 shadow-soft hover:text-brand-700";
@@ -111,30 +104,19 @@ export function Layout() {
               to="/dashboard"
               className="flex items-center gap-2.5 active:scale-95 transition"
             >
+              <img
+                src="/logo-mark.png"
+                alt="AfriHome"
+                className={`h-10 w-10 rounded-2xl object-contain shadow-soft ${
+                  onHero ? "ring-1 ring-white/20" : "bg-white"
+                }`}
+              />
               <span
-                className={`grid h-10 w-10 place-items-center rounded-2xl font-display text-sm font-bold ${
-                  onHero
-                    ? "bg-white/15 text-white"
-                    : "bg-brand-950 text-white shadow-soft"
+                className={`block max-w-[9rem] truncate text-sm font-bold ${
+                  onHero ? "text-white" : "text-ink-900"
                 }`}
               >
-                {initials || "A"}
-              </span>
-              <span className="leading-tight">
-                <span
-                  className={`block text-[11px] font-semibold uppercase tracking-widest ${
-                    onHero ? "text-white/60" : "text-ink-400"
-                  }`}
-                >
-                  AfriHome
-                </span>
-                <span
-                  className={`block max-w-[9rem] truncate text-sm font-bold ${
-                    onHero ? "text-white" : "text-ink-900"
-                  }`}
-                >
-                  {user.fullName.split(" ")[0]}
-                </span>
+                {user.fullName.split(" ")[0]}
               </span>
             </Link>
           ) : (
@@ -238,18 +220,27 @@ export function Layout() {
             ))}
 
             {/* Raised center action — Invest */}
-            <NavLink
-              to="/packages"
-              aria-label="Invest"
-              className={({ isActive }) =>
-                `relative -top-5 grid h-14 w-14 shrink-0 place-items-center rounded-full transition active:scale-95 ${
-                  isActive
-                    ? "bg-primary text-white shadow-float ring-4 ring-background"
-                    : "bg-white text-brand-950 shadow-float ring-4 ring-background"
-                }`
-              }
-            >
-              <Building2 size={22} strokeWidth={2.25} />
+            <NavLink to="/packages" aria-label="Invest" className="flex w-14 shrink-0 flex-col items-center gap-1">
+              {({ isActive }) => (
+                <>
+                  <span
+                    className={`relative -top-5 grid h-14 w-14 place-items-center rounded-full transition active:scale-95 ${
+                      isActive
+                        ? "bg-primary text-white shadow-float ring-4 ring-background"
+                        : "bg-white text-brand-950 shadow-float ring-4 ring-background"
+                    }`}
+                  >
+                    <Building2 size={22} strokeWidth={2.25} />
+                  </span>
+                  <span
+                    className={`-mt-3 text-[10px] font-bold leading-none ${
+                      isActive ? "text-white" : "text-white/45"
+                    }`}
+                  >
+                    Invest
+                  </span>
+                </>
+              )}
             </NavLink>
 
             {RIGHT_TABS.map(({ to, label, icon: Icon }) => (
@@ -283,13 +274,7 @@ function DockTab({
       {({ isActive }) => (
         <>
           <Icon size={20} strokeWidth={isActive ? 2.5 : 2} />
-          <span
-            className={`text-[10px] font-bold leading-none ${
-              isActive ? "opacity-100" : "opacity-0"
-            }`}
-          >
-            {label}
-          </span>
+          <span className="text-[10px] font-bold leading-none">{label}</span>
           <span
             className={`h-1 w-1 rounded-full bg-primary transition-opacity ${
               isActive ? "opacity-100" : "opacity-0"
