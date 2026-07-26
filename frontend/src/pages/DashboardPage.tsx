@@ -1,8 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import {
-  ArrowDownToLine,
-  ArrowUpFromLine,
   Building2,
   CheckCircle2,
   Coins,
@@ -83,9 +81,6 @@ const QUICK_ACTIONS: {
   label: string;
   icon: typeof Building2;
 }[] = [
-  { to: "/wallet", label: "Add money", icon: ArrowDownToLine },
-  { to: "/wallet", label: "Withdraw", icon: ArrowUpFromLine },
-  { to: "/packages", label: "Invest", icon: Building2 },
   { to: "/wallet", label: "Rewards", icon: Trophy },
   { to: "/referrals", label: "Refer & earn", icon: Gift },
   { to: "/about", label: "About us", icon: Info },
@@ -257,17 +252,19 @@ export function DashboardPage() {
         )}
       </div>
 
-      <div className="no-scrollbar relative -mt-7 flex gap-2 overflow-x-auto pb-1">
+      <div className="relative -mt-7 grid grid-cols-3 gap-2">
         {QUICK_ACTIONS.map(({ to, label, icon: Icon }) => (
           <Link
             key={label}
             to={to}
-            className="flex shrink-0 items-center gap-2 rounded-full bg-card py-2.5 pl-3 pr-4 shadow-soft transition active:scale-95"
+            className="flex flex-col items-center gap-1.5 rounded-2xl bg-card px-1.5 py-3 text-center shadow-soft transition active:scale-95"
           >
-            <span className="grid h-7 w-7 place-items-center rounded-full bg-accent text-accent-foreground">
+            <span className="grid h-8 w-8 place-items-center rounded-full bg-accent text-accent-foreground">
               <Icon size={14} strokeWidth={2.4} />
             </span>
-            <span className="text-xs font-bold text-ink-800">{label}</span>
+            <span className="text-[11px] font-bold leading-tight text-ink-800">
+              {label}
+            </span>
           </Link>
         ))}
       </div>

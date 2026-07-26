@@ -27,7 +27,7 @@ const RIGHT_TABS = [
 
 // Pages that open with a deep forest hero behind the header — the header goes
 // transparent with light content on these.
-const HERO_ROUTES = new Set(["/dashboard", "/login", "/signup"]);
+const HERO_ROUTES = new Set(["/dashboard"]);
 
 export function Layout() {
   const { user, logout } = useAuthStore();
@@ -197,7 +197,7 @@ export function Layout() {
                 <LogOut size={17} />
               </button>
             </div>
-          ) : (
+          ) : pathname !== "/login" && pathname !== "/signup" ? (
             <div className="flex items-center gap-2">
               <Link
                 to="/login"
@@ -218,7 +218,7 @@ export function Layout() {
                 Sign up
               </Link>
             </div>
-          )}
+          ) : null}
         </div>
       </header>
 
