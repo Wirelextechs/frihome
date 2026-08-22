@@ -9,6 +9,9 @@ import {
   walletTransactions,
   users,
 } from "../db/schema.js";
+import { sendSms } from "./moolreSms.js";
+import { getSmsRules } from "./smsSettings.js";
+import { notify } from "./notify.js";
 
 const CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no 0/O/1/I/L
 
@@ -112,6 +115,7 @@ export async function creditReferralRewards(
 
   const configRows = await db.select().from(referralConfig);
   const configByLevel = new Map(configRows.map((c) => [c.level, c]));
+  const smsRules = await getSmsRules();
 
   for (const rel of relationships) {
     const config = configByLevel.get(rel.level);
@@ -167,5 +171,26 @@ export async function creditReferralRewards(
       status: "completed",
       description: `Referral reward (Level ${rel.level})`,
     });
+
+    if (smsRules.referralRewardEnabled) {
+      const [referrer] = await db
+        .select({ phone: users.phone })
+        .from(users)
+        .where(eq(users.id, rel.referrerId));
+      if (referrer?.phone) {
+        await sendSms(
+          referrer.phone,
+          `You earned a referral reward of GHS ${rewardAmount.toFixed(2)} (Level ${rel.level}).`,
+        );
+      }
+    }
+
+    notify({
+      userId: rel.referrerId,
+      type: "referral_reward",
+      title: "Referral reward earned",
+      body: `You earned GHS ${rewardAmount.toFixed(2)} (Level ${rel.level}) from a referral's investment.`,
+      url: "/referrals",
+    }).catch((err) => console.error("Referral reward notify failed:", err));
   }
 }

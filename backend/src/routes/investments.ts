@@ -9,9 +9,12 @@ import {
   wallets,
   walletTransactions,
   payouts,
+  users,
 } from "../db/schema.js";
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import { creditReferralRewards } from "../lib/referrals.js";
+import { sendSms } from "../lib/moolreSms.js";
+import { getSmsRules } from "../lib/smsSettings.js";
 
 export const investmentsRouter = Router();
 
@@ -100,6 +103,20 @@ investmentsRouter.post("/", requireAuth, async (req: AuthedRequest, res) => {
   await creditReferralRewards(userId, investment.id, amountGhs).catch((err) =>
     console.error("Failed to credit referral rewards:", err),
   );
+
+  const smsRules = await getSmsRules();
+  if (smsRules.packagePurchaseEnabled) {
+    const [target] = await db
+      .select({ phone: users.phone })
+      .from(users)
+      .where(eq(users.id, userId));
+    if (target?.phone) {
+      await sendSms(
+        target.phone,
+        `You purchased "${project.title}" for GHS ${amount.toFixed(2)} — ${project.durationDays} days at ${Number(project.expectedReturnPct).toFixed(2)}% expected return.`,
+      );
+    }
+  }
 
   res.status(201).json({ investment });
 });

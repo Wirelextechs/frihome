@@ -14,6 +14,8 @@ import {
 import { useAuthStore } from "../lib/store";
 import { api } from "../lib/api";
 import { AnnouncementOverlay } from "./AnnouncementOverlay";
+import { LaunchDaysBanner } from "./LaunchDaysBanner";
+import { NotificationBell } from "./NotificationBell";
 
 // Side tabs flank the raised center Invest button in the dock.
 const LEFT_TABS = [
@@ -138,6 +140,7 @@ export function Layout() {
 
           {user ? (
             <div className="flex items-center gap-1.5">
+              <NotificationBell buttonClassName={actionBtn} />
               <Link
                 to="/chat"
                 className={`relative grid h-10 w-10 place-items-center rounded-2xl transition active:scale-95 ${actionBtn}`}
@@ -207,6 +210,7 @@ export function Layout() {
       <main
         className={`mx-auto w-full max-w-sm px-4 pt-16 sm:px-6 ${user ? "pb-32" : "pb-8"}`}
       >
+        <LaunchDaysBanner />
         <Outlet />
       </main>
 

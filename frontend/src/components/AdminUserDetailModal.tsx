@@ -49,6 +49,7 @@ const SCOPE_LABELS: Record<string, string> = {
   "announcements.manage": "Manage announcements",
   "support.manage": "Manage support links",
   "chats.manage": "Manage live chats",
+  "sms.manage": "Manage SMS notifications & broadcasts",
 };
 
 const ALL_SCOPES = Object.keys(SCOPE_LABELS);

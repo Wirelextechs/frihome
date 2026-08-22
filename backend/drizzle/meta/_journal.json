@@ -8,6 +8,13 @@
       "when": 1784948835990,
       "tag": "0000_full_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1787426300306,
+      "tag": "0001_notifications_sms_withdrawal_reqs",
+      "breakpoints": true
     }
   ]
 }

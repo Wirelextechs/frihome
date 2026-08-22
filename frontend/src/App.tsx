@@ -38,6 +38,9 @@ import { AdminPaymentSettingsPage } from "./pages/AdminPaymentSettingsPage";
 import { ChatPage } from "./pages/ChatPage";
 import { AdminChatsPage } from "./pages/AdminChatsPage";
 import { AdminChatDetailPage } from "./pages/AdminChatDetailPage";
+import { AdminSmsSettingsPage } from "./pages/AdminSmsSettingsPage";
+import { AdminWithdrawalRequirementsPage } from "./pages/AdminWithdrawalRequirementsPage";
+import { AdminTransactionsPage } from "./pages/AdminTransactionsPage";
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   const user = useAuthStore((s) => s.user);
@@ -296,6 +299,30 @@ export default function App() {
         element={
           <RequireAuth>
             <AdminChatDetailPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/sms"
+        element={
+          <RequireAuth>
+            <AdminSmsSettingsPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/withdrawal-requirements"
+        element={
+          <RequireAuth>
+            <AdminWithdrawalRequirementsPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/transactions"
+        element={
+          <RequireAuth>
+            <AdminTransactionsPage />
           </RequireAuth>
         }
       />

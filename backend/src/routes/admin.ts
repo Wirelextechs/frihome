@@ -31,6 +31,10 @@ import {
   chatMessages,
   chatThreadLocks,
   binancePayAccounts,
+  withdrawalRequirements,
+  smsSettings,
+  smsBroadcasts,
+  platformSettings,
 } from "../db/schema.js";
 import {
   requireAuth,
@@ -45,6 +49,15 @@ import { uploadProjectImage, uploadPaymentScreenshot } from "../lib/storage.js";
 import { generateRewardPoolCode } from "../lib/rewardPoolCode.js";
 import { getPaymentRules } from "../lib/paymentSettings.js";
 import { publishChatEvent } from "../lib/realtime.js";
+import {
+  sendSms,
+  sendBulkSms,
+  getSmsBalance,
+  estimateSmsSegments,
+} from "../lib/moolreSms.js";
+import { getSmsRules } from "../lib/smsSettings.js";
+import { notify } from "../lib/notify.js";
+import { notifyUserOfChatMessage } from "../lib/chatNotify.js";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -326,6 +339,22 @@ adminRouter.post(
         userId,
         { amountGhs, reason, balanceBefore, balanceAfter },
       );
+
+      const smsRules = await getSmsRules();
+      if (smsRules.suspiciousAdjustmentEnabled && target.phone) {
+        await sendSms(
+          target.phone,
+          `Your wallet was ${direction === "credit" ? "credited" : "debited"} GHS ${amountGhs.toFixed(2)} by an admin (${reason}). New balance: GHS ${balanceAfter.toFixed(2)}. Contact support if you didn't expect this.`,
+        );
+      }
+
+      notify({
+        userId,
+        type: "wallet_adjustment",
+        title: direction === "credit" ? "Wallet credited" : "Wallet debited",
+        body: `An admin ${direction === "credit" ? "credited" : "debited"} GHS ${amountGhs.toFixed(2)} (${reason}). New balance: GHS ${balanceAfter.toFixed(2)}.`,
+        url: "/wallet",
+      }).catch((err) => console.error("Wallet adjustment notify failed:", err));
 
       res.json({ success: true, balanceBefore, balanceAfter });
     } catch (error) {
@@ -1022,6 +1051,61 @@ adminRouter.get("/payments/crypto/:paymentId", requirePermission("payments.manag
   }
 });
 
+// ============ TRANSACTIONS ============
+
+adminRouter.get(
+  "/transactions",
+  requirePermission("payments.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const page = Math.max(1, parseInt(req.query.page as string) || 1);
+      const limit = 50;
+      const offset = (page - 1) * limit;
+      const search = (req.query.search as string) || "";
+
+      const conditions = search
+        ? or(
+            ilike(users.fullName, `%${search}%`),
+            ilike(users.phone, `%${search}%`),
+            ilike(walletTransactions.reference, `%${search}%`),
+          )
+        : undefined;
+
+      const [rows, countResult] = await Promise.all([
+        db
+          .select({
+            id: walletTransactions.id,
+            type: walletTransactions.type,
+            amountGhs: walletTransactions.amountGhs,
+            status: walletTransactions.status,
+            method: walletTransactions.method,
+            reference: walletTransactions.reference,
+            description: walletTransactions.description,
+            createdAt: walletTransactions.createdAt,
+            userFullName: users.fullName,
+            userPhone: users.phone,
+          })
+          .from(walletTransactions)
+          .innerJoin(users, eq(users.id, walletTransactions.userId))
+          .where(conditions)
+          .orderBy(desc(walletTransactions.createdAt))
+          .limit(limit)
+          .offset(offset),
+        db
+          .select({ count: sql<number>`count(*)` })
+          .from(walletTransactions)
+          .innerJoin(users, eq(users.id, walletTransactions.userId))
+          .where(conditions),
+      ]);
+
+      res.json({ data: rows, total: countResult[0]?.count ?? 0, page, limit });
+    } catch (error) {
+      console.error("Error fetching transactions:", error);
+      res.status(500).json({ error: "Failed to fetch transactions" });
+    }
+  },
+);
+
 // ============ WITHDRAWALS ============
 
 adminRouter.get("/withdrawals/pending", requirePermission("withdrawals.manage"), async (req: AuthedRequest, res) => {
@@ -1123,6 +1207,28 @@ adminRouter.post("/withdrawals/:txnId/approve", requirePermission("withdrawals.m
 
     await logAdminAction(req.user!.userId, "APPROVE_WITHDRAWAL", "wallet_transactions", txnId);
 
+    const smsRules = await getSmsRules();
+    if (smsRules.withdrawalApprovedEnabled) {
+      const [target] = await db
+        .select({ phone: users.phone })
+        .from(users)
+        .where(eq(users.id, txn.userId));
+      if (target?.phone) {
+        await sendSms(
+          target.phone,
+          `Your withdrawal of GHS ${Number(txn.amountGhs).toFixed(2)} has been approved and paid out.`,
+        );
+      }
+    }
+
+    notify({
+      userId: txn.userId,
+      type: "withdrawal_approved",
+      title: "Withdrawal approved",
+      body: `Your withdrawal of GHS ${Number(txn.amountGhs).toFixed(2)} has been approved and paid out.`,
+      url: "/wallet",
+    }).catch((err) => console.error("Withdrawal approved notify failed:", err));
+
     res.json({ success: true });
   } catch (error) {
     console.error("Error approving withdrawal:", error);
@@ -1159,6 +1265,14 @@ adminRouter.post("/withdrawals/:txnId/reject", requirePermission("withdrawals.ma
     await logAdminAction(req.user!.userId, "REJECT_WITHDRAWAL", "wallet_transactions", txnId, {
       reason,
     });
+
+    notify({
+      userId: txn.userId,
+      type: "withdrawal_rejected",
+      title: "Withdrawal rejected",
+      body: `Your withdrawal of GHS ${Number(txn.amountGhs).toFixed(2)} was rejected${reason ? `: ${reason}` : ""}. The amount has been returned to your wallet.`,
+      url: "/wallet",
+    }).catch((err) => console.error("Withdrawal rejected notify failed:", err));
 
     res.json({ success: true });
   } catch (error) {
@@ -2016,6 +2130,28 @@ adminRouter.post(
         readByAdmin: true,
       });
 
+      const smsRules = await getSmsRules();
+      if (smsRules.depositConfirmedEnabled) {
+        const [target] = await db
+          .select({ phone: users.phone })
+          .from(users)
+          .where(eq(users.id, deposit.userId));
+        if (target?.phone) {
+          await sendSms(
+            target.phone,
+            `Your deposit of GHS ${amount.toFixed(2)} has been confirmed and your wallet has been credited.`,
+          );
+        }
+      }
+
+      notify({
+        userId: deposit.userId,
+        type: "deposit_approved",
+        title: "Deposit confirmed",
+        body: `GHS ${amount.toFixed(2)} has been credited to your wallet.`,
+        url: "/wallet",
+      }).catch((err) => console.error("Deposit approved notify failed:", err));
+
       res.json({ success: true, balanceAfter });
     } catch (error) {
       console.error("Error approving manual deposit:", error);
@@ -2077,6 +2213,14 @@ adminRouter.post(
         body: `Your deposit of GHS ${Number(deposit.amountGhs).toFixed(2)} (ref ${deposit.reference}) was rejected: ${parsed.data.reason}`,
         readByAdmin: true,
       });
+
+      notify({
+        userId: deposit.userId,
+        type: "deposit_rejected",
+        title: "Deposit rejected",
+        body: `Your deposit of GHS ${Number(deposit.amountGhs).toFixed(2)} was rejected: ${parsed.data.reason}`,
+        url: "/wallet",
+      }).catch((err) => console.error("Deposit rejected notify failed:", err));
 
       res.json({ success: true });
     } catch (error) {
@@ -2783,6 +2927,10 @@ adminRouter.post(
         console.error("Realtime publish failed:", err),
       );
 
+      notifyUserOfChatMessage(userId).catch((err) =>
+        console.error("Chat SMS to user failed:", err),
+      );
+
       res.status(201).json({ message: { ...message, senderName: adminName } });
     } catch (error) {
       console.error("Error sending chat message:", error);
@@ -3239,3 +3387,433 @@ adminRouter.put(
     }
   },
 );
+
+// ============ WITHDRAWAL REQUIREMENTS ============
+
+adminRouter.get(
+  "/withdrawal-requirements",
+  requirePermission("withdrawals.manage"),
+  async (_req: AuthedRequest, res) => {
+    try {
+      const rows = await db
+        .select({
+          id: withdrawalRequirements.id,
+          turnNumber: withdrawalRequirements.turnNumber,
+          minDirectInvites: withdrawalRequirements.minDirectInvites,
+          minPackageId: withdrawalRequirements.minPackageId,
+          minPackageTitle: projects.title,
+          isActive: withdrawalRequirements.isActive,
+          updatedAt: withdrawalRequirements.updatedAt,
+          updatedByPhone: users.phone,
+        })
+        .from(withdrawalRequirements)
+        .innerJoin(projects, eq(projects.id, withdrawalRequirements.minPackageId))
+        .leftJoin(users, eq(users.id, withdrawalRequirements.updatedBy))
+        .orderBy(withdrawalRequirements.turnNumber, withdrawalRequirements.createdAt);
+
+      res.json({ data: rows });
+    } catch (error) {
+      console.error("Error fetching withdrawal requirements:", error);
+      res.status(500).json({ error: "Failed to fetch withdrawal requirements" });
+    }
+  },
+);
+
+const withdrawalRequirementSchema = z.object({
+  turnNumber: z.number().int().min(1),
+  minDirectInvites: z.number().int().min(1),
+  minPackageId: z.string().uuid(),
+  isActive: z.boolean().optional(),
+});
+
+adminRouter.post(
+  "/withdrawal-requirements",
+  requirePermission("withdrawals.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const parsed = withdrawalRequirementSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.flatten() });
+      }
+      const { turnNumber, minDirectInvites, minPackageId, isActive } = parsed.data;
+
+      const [pkg] = await db
+        .select({ id: projects.id })
+        .from(projects)
+        .where(eq(projects.id, minPackageId))
+        .limit(1);
+      if (!pkg) {
+        return res.status(400).json({ error: "Package not found" });
+      }
+
+      const [created] = await db
+        .insert(withdrawalRequirements)
+        .values({
+          turnNumber,
+          minDirectInvites,
+          minPackageId,
+          isActive: isActive ?? true,
+          updatedBy: req.user!.userId,
+        })
+        .returning();
+
+      await logAdminAction(
+        req.user!.userId,
+        "WITHDRAWAL_REQUIREMENT_CREATED",
+        "withdrawal_requirements",
+        created.id,
+        { turnNumber, minDirectInvites, minPackageId, isActive },
+      );
+
+      res.json({ data: created });
+    } catch (error) {
+      console.error("Error creating withdrawal requirement:", error);
+      res.status(500).json({ error: "Failed to create withdrawal requirement" });
+    }
+  },
+);
+
+const withdrawalRequirementUpdateSchema = z.object({
+  minDirectInvites: z.number().int().min(1).optional(),
+  minPackageId: z.string().uuid().optional(),
+  isActive: z.boolean().optional(),
+});
+
+adminRouter.patch(
+  "/withdrawal-requirements/:id",
+  requirePermission("withdrawals.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const parsed = withdrawalRequirementUpdateSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.flatten() });
+      }
+      if (Object.keys(parsed.data).length === 0) {
+        return res.status(400).json({ error: "No fields to update" });
+      }
+
+      const [updated] = await db
+        .update(withdrawalRequirements)
+        .set({
+          ...parsed.data,
+          updatedBy: req.user!.userId,
+          updatedAt: new Date(),
+        })
+        .where(eq(withdrawalRequirements.id, req.params.id))
+        .returning();
+
+      if (!updated) {
+        return res.status(404).json({ error: "Requirement not found" });
+      }
+
+      await logAdminAction(
+        req.user!.userId,
+        "WITHDRAWAL_REQUIREMENT_UPDATED",
+        "withdrawal_requirements",
+        updated.id,
+        parsed.data,
+      );
+
+      res.json({ data: updated });
+    } catch (error) {
+      console.error("Error updating withdrawal requirement:", error);
+      res.status(500).json({ error: "Failed to update withdrawal requirement" });
+    }
+  },
+);
+
+adminRouter.delete(
+  "/withdrawal-requirements/:id",
+  requirePermission("withdrawals.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const [deleted] = await db
+        .delete(withdrawalRequirements)
+        .where(eq(withdrawalRequirements.id, req.params.id))
+        .returning();
+
+      if (!deleted) {
+        return res.status(404).json({ error: "Requirement not found" });
+      }
+
+      await logAdminAction(
+        req.user!.userId,
+        "WITHDRAWAL_REQUIREMENT_DELETED",
+        "withdrawal_requirements",
+        req.params.id,
+        {},
+      );
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting withdrawal requirement:", error);
+      res.status(500).json({ error: "Failed to delete withdrawal requirement" });
+    }
+  },
+);
+
+// ============ PLATFORM SETTINGS ============
+
+// Site-wide launch date, shown as a "days in operation" banner to investors.
+adminRouter.get("/platform-settings", async (_req: AuthedRequest, res) => {
+  try {
+    const [row] = await db.select().from(platformSettings).limit(1);
+    res.json({ data: { launchDate: (row?.launchDate ?? new Date()).toISOString() } });
+  } catch (error) {
+    console.error("Error fetching platform settings:", error);
+    res.status(500).json({ error: "Failed to fetch platform settings" });
+  }
+});
+
+const platformSettingsSchema = z.object({
+  launchDate: z.coerce.date(),
+});
+
+adminRouter.put("/platform-settings", async (req: AuthedRequest, res) => {
+  try {
+    const parsed = platformSettingsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.flatten() });
+    }
+
+    const values = {
+      launchDate: parsed.data.launchDate,
+      updatedBy: req.user!.userId,
+      updatedAt: new Date(),
+    };
+
+    const [existing] = await db
+      .select({ id: platformSettings.id })
+      .from(platformSettings)
+      .limit(1);
+    let row;
+    if (existing) {
+      [row] = await db
+        .update(platformSettings)
+        .set(values)
+        .where(eq(platformSettings.id, existing.id))
+        .returning();
+    } else {
+      [row] = await db.insert(platformSettings).values(values).returning();
+    }
+
+    await logAdminAction(
+      req.user!.userId,
+      "UPDATE_PLATFORM_SETTINGS",
+      "platform_settings",
+      row.id,
+      { launchDate: values.launchDate },
+    );
+
+    res.json({ data: { launchDate: row.launchDate.toISOString() } });
+  } catch (error) {
+    console.error("Error updating platform settings:", error);
+    res.status(500).json({ error: "Failed to update platform settings" });
+  }
+});
+
+// ============ SMS ============
+
+// Which events trigger an SMS to the user; admin-controlled.
+adminRouter.get("/sms-settings", requirePermission("sms.manage"), async (_req: AuthedRequest, res) => {
+  try {
+    const rules = await getSmsRules();
+    res.json({ data: rules });
+  } catch (error) {
+    console.error("Error fetching SMS settings:", error);
+    res.status(500).json({ error: "Failed to fetch SMS settings" });
+  }
+});
+
+const smsSettingsSchema = z.object({
+  registrationConfirmedEnabled: z.boolean(),
+  withdrawalRequestedEnabled: z.boolean(),
+  withdrawalApprovedEnabled: z.boolean(),
+  depositConfirmedEnabled: z.boolean(),
+  referralRewardEnabled: z.boolean(),
+  suspiciousAdjustmentEnabled: z.boolean(),
+  packagePurchaseEnabled: z.boolean(),
+  chatMessageEnabled: z.boolean(),
+  depositReviewEnabled: z.boolean(),
+  adminAlertPhones: z.array(z.string().trim().min(7).max(20)).max(10).default([]),
+});
+
+adminRouter.put(
+  "/sms-settings",
+  requirePermission("sms.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const parsed = smsSettingsSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.flatten() });
+      }
+
+      const values = {
+        ...parsed.data,
+        adminAlertPhones: [...new Set(parsed.data.adminAlertPhones.map((p) => p.trim()))],
+        updatedBy: req.user!.userId,
+        updatedAt: new Date(),
+      };
+
+      const [existing] = await db
+        .select({ id: smsSettings.id })
+        .from(smsSettings)
+        .limit(1);
+      let row;
+      if (existing) {
+        [row] = await db
+          .update(smsSettings)
+          .set(values)
+          .where(eq(smsSettings.id, existing.id))
+          .returning();
+      } else {
+        [row] = await db.insert(smsSettings).values(values).returning();
+      }
+
+      await logAdminAction(
+        req.user!.userId,
+        "SMS_SETTINGS_UPDATED",
+        "sms_settings",
+        row.id,
+        parsed.data,
+      );
+
+      res.json({ data: row });
+    } catch (error) {
+      console.error("Error updating SMS settings:", error);
+      res.status(500).json({ error: "Failed to update SMS settings" });
+    }
+  },
+);
+
+const testSmsSchema = z.object({
+  recipient: z.string().trim().min(9),
+  message: z.string().trim().min(1).max(160),
+});
+
+adminRouter.post("/sms/test", requirePermission("sms.manage"), async (req: AuthedRequest, res) => {
+  const parsed = testSmsSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
+  }
+  const result = await sendSms(parsed.data.recipient, parsed.data.message);
+  if (!result.ok) {
+    return res.status(502).json({ error: result.error });
+  }
+  res.json({ data: { sent: true } });
+});
+
+adminRouter.get("/sms/broadcast-info", requirePermission("sms.manage"), async (_req: AuthedRequest, res) => {
+  const [balanceResult, recipientCountRow] = await Promise.all([
+    getSmsBalance(),
+    db.select({ count: sql<number>`count(*)` }).from(users),
+  ]);
+  if (!balanceResult.ok) {
+    return res.status(502).json({ error: balanceResult.error });
+  }
+  res.json({
+    data: {
+      balance: balanceResult.balance,
+      recipientCount: Number(recipientCountRow[0]?.count ?? 0),
+    },
+  });
+});
+
+const broadcastSmsSchema = z.object({
+  message: z.string().trim().min(1).max(480),
+});
+
+const BROADCAST_BATCH_SIZE = 50;
+
+adminRouter.post("/sms/broadcast", requirePermission("sms.manage"), async (req: AuthedRequest, res) => {
+  const parsed = broadcastSmsSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
+  }
+
+  const recipients = await db.select({ phone: users.phone }).from(users);
+  if (recipients.length === 0) {
+    return res.status(400).json({ error: "No users to send to" });
+  }
+
+  const [broadcast] = await db
+    .insert(smsBroadcasts)
+    .values({
+      message: parsed.data.message,
+      targetCount: recipients.length,
+      status: "in_progress",
+      createdBy: req.user!.userId,
+    })
+    .returning();
+
+  // Sent as a series of small batches (rather than one giant request) so a
+  // failure partway through still leaves an accurate sent/failed split.
+  let sentCount = 0;
+  let failedCount = 0;
+  let lastError: string | undefined;
+  for (let i = 0; i < recipients.length; i += BROADCAST_BATCH_SIZE) {
+    const batch = recipients.slice(i, i + BROADCAST_BATCH_SIZE);
+    const result = await sendBulkSms(
+      batch.map((r) => ({ recipient: r.phone, message: parsed.data.message })),
+    );
+    if (result.ok) {
+      sentCount += batch.length;
+    } else {
+      failedCount += batch.length;
+      lastError = result.error;
+    }
+  }
+
+  const status = failedCount === 0 ? "completed" : sentCount === 0 ? "failed" : "completed";
+  const [updated] = await db
+    .update(smsBroadcasts)
+    .set({
+      sentCount,
+      failedCount,
+      status,
+      errorMessage: lastError ?? null,
+      completedAt: new Date(),
+    })
+    .where(eq(smsBroadcasts.id, broadcast.id))
+    .returning();
+
+  await logAdminAction(
+    req.user!.userId,
+    "SMS_BROADCAST_SENT",
+    "sms_broadcasts",
+    broadcast.id,
+    {
+      recipientCount: recipients.length,
+      sentCount,
+      failedCount,
+      creditsUsed: sentCount * estimateSmsSegments(parsed.data.message),
+      message: parsed.data.message,
+    },
+  );
+
+  res.json({ data: updated });
+});
+
+adminRouter.get("/sms/broadcasts", requirePermission("sms.manage"), async (req: AuthedRequest, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const limit = 20;
+    const offset = (page - 1) * limit;
+
+    const rows = await db
+      .select()
+      .from(smsBroadcasts)
+      .orderBy(desc(smsBroadcasts.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    const [{ count }] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(smsBroadcasts);
+
+    res.json({ data: rows, total: Number(count), page, limit });
+  } catch (error) {
+    console.error("Error fetching SMS broadcasts:", error);
+    res.status(500).json({ error: "Failed to fetch SMS broadcasts" });
+  }
+});

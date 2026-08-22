@@ -8,6 +8,7 @@ import { chatMessages, manualDeposits, users, chatThreadLocks } from "../db/sche
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import { uploadPaymentScreenshot } from "../lib/storage.js";
 import { publishChatEvent } from "../lib/realtime.js";
+import { notifyAdminOfChatMessage } from "../lib/chatNotify.js";
 
 export const chatRouter = Router();
 
@@ -116,6 +117,19 @@ chatRouter.post("/messages", requireAuth, async (req: AuthedRequest, res) => {
     publishChatEvent(req.user!.userId, { type: "messages-changed" }).catch((err) =>
       console.error("Realtime publish failed:", err),
     );
+
+    db.select({ fullName: users.fullName })
+      .from(users)
+      .where(eq(users.id, req.user!.userId))
+      .limit(1)
+      .then(([sender]) =>
+        notifyAdminOfChatMessage(
+          req.user!.userId,
+          sender?.fullName ?? "an investor",
+          parsed.data.body ?? null,
+        ),
+      )
+      .catch((err) => console.error("Chat SMS lookup failed:", err));
 
     res.status(201).json({ message });
   } catch (error) {

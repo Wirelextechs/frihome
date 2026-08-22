@@ -29,6 +29,10 @@ import { getGhsPerUsd } from "../lib/fx.js";
 import { generateDepositReference } from "../lib/manualDeposits.js";
 import { uploadPaymentScreenshot } from "../lib/storage.js";
 import { checkWithdrawalWindow, getPaymentRules } from "../lib/paymentSettings.js";
+import { checkWithdrawalRequirements } from "../lib/withdrawalRequirements.js";
+import { sendSms, sendSmsToMany } from "../lib/moolreSms.js";
+import { getSmsRules } from "../lib/smsSettings.js";
+import { notifyAdminsWithScope } from "../lib/adminNotify.js";
 
 export const walletRouter = Router();
 
@@ -211,6 +215,11 @@ walletRouter.post("/withdraw", requireAuth, async (req: AuthedRequest, res) => {
     }
   }
 
+  const requirementCheck = await checkWithdrawalRequirements(userId);
+  if (!requirementCheck.ok) {
+    return res.status(400).json({ error: requirementCheck.reason });
+  }
+
   await getOrCreateWallet(userId);
 
   // Fee is charged on the requested amount; the payout the admin sends is
@@ -263,6 +272,26 @@ walletRouter.post("/withdraw", requireAuth, async (req: AuthedRequest, res) => {
     return res.status(400).json({ error: "Insufficient wallet balance" });
   }
   const { updated, transaction } = result;
+
+  const [target] = await db
+    .select({ phone: users.phone, fullName: users.fullName })
+    .from(users)
+    .where(eq(users.id, userId));
+
+  const smsRules = await getSmsRules();
+  if (smsRules.withdrawalRequestedEnabled && target?.phone) {
+    await sendSms(
+      target.phone,
+      `Your withdrawal request of GHS ${amount.toFixed(2)} has been received and is under review.`,
+    );
+  }
+
+  notifyAdminsWithScope("withdrawals.manage", {
+    type: "withdrawal_requested",
+    title: "New withdrawal request",
+    body: `GHS ${amount.toFixed(2)} requested by ${target?.fullName ?? "an investor"}`,
+    url: "/admin/withdrawals",
+  }).catch((err) => console.error("Withdrawal request notify failed:", err));
 
   res.status(201).json({ wallet: updated, transaction });
 });
@@ -545,6 +574,25 @@ walletRouter.post(
         manualDepositId: deposit.id,
         readByUser: true,
       });
+
+      // Alert every deposits.manage admin (in-app + push) that a deposit is
+      // waiting for review, and nudge the configured admin phone by SMS.
+      notifyAdminsWithScope("deposits.manage", {
+        type: "deposit_submitted",
+        title: "New deposit needs review",
+        body: `GHS ${amountGhs.toFixed(2)} from ${senderName}, ref ${reference}`,
+        url: "/admin/deposits",
+      }).catch((err) => console.error("Deposit review notify failed:", err));
+
+      getSmsRules()
+        .then((rules) => {
+          if (!rules.depositReviewEnabled || rules.adminAlertPhones.length === 0) return;
+          return sendSmsToMany(
+            rules.adminAlertPhones,
+            `AfriHome: New deposit needs review - GHS ${amountGhs.toFixed(2)} from ${senderName}, ref ${reference}.`,
+          );
+        })
+        .catch((err) => console.error("Deposit review SMS failed:", err));
 
       res.status(201).json({ deposit });
     } catch (error: any) {

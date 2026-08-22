@@ -115,12 +115,17 @@ export default {
           from: { opacity: 1 },
           to: { opacity: 0 },
         },
+        shimmer: {
+          "0%": { backgroundPosition: "0% 50%" },
+          "100%": { backgroundPosition: "200% 50%" },
+        },
       },
       animation: {
         "sheet-in": "sheet-in 0.28s cubic-bezier(0.32, 0.72, 0, 1)",
         "sheet-out": "sheet-out 0.2s cubic-bezier(0.32, 0.72, 0, 1)",
         "overlay-in": "overlay-in 0.2s ease-out",
         "overlay-out": "overlay-out 0.2s ease-in",
+        shimmer: "shimmer 3s linear infinite",
       },
     },
   },
