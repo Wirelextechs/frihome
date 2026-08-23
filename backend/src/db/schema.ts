@@ -166,6 +166,9 @@ export const projects = pgTable("projects", {
   durationDays: numeric("duration_days", { precision: 6, scale: 0 }).notNull(),
   imageUrl: text("image_url"),
   isActive: boolean("is_active").notNull().default(true),
+  // Off by default: a user may only hold one investment (any status) in a
+  // given package. Admins tick this per-package to allow repeat purchases.
+  allowDuplicatePurchase: boolean("allow_duplicate_purchase").notNull().default(false),
   fundingStatus: fundingStatusEnum("funding_status").notNull().default("open"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),

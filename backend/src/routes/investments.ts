@@ -39,6 +39,19 @@ investmentsRouter.post("/", requireAuth, async (req: AuthedRequest, res) => {
     return res.status(404).json({ error: "Package not found" });
   }
 
+  if (!project.allowDuplicatePurchase) {
+    const [existing] = await db
+      .select({ id: investments.id })
+      .from(investments)
+      .where(and(eq(investments.userId, userId), eq(investments.projectId, projectId)))
+      .limit(1);
+    if (existing) {
+      return res.status(400).json({
+        error: "You've already invested in this package.",
+      });
+    }
+  }
+
   // Each package has one fixed investment amount — no range, no client input.
   const amountGhs = project.minInvestmentGhs;
   const amount = Number(amountGhs);

@@ -59,6 +59,7 @@ export function AdminPackagesPage() {
         minInvestmentGhs: values.minInvestmentGhs,
         expectedReturnPct: values.expectedReturnPct,
         durationDays: values.durationDays,
+        allowDuplicatePurchase: values.allowDuplicatePurchase,
       });
       toast.success("Package created");
       setShowForm(false);

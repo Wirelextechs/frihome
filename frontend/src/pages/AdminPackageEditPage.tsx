@@ -43,6 +43,7 @@ export function AdminPackageEditPage() {
         minInvestmentGhs: values.minInvestmentGhs,
         expectedReturnPct: values.expectedReturnPct,
         durationDays: values.durationDays,
+        allowDuplicatePurchase: values.allowDuplicatePurchase,
       });
       toast.success("Package updated");
       fetchPackage();

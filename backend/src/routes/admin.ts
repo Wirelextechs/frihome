@@ -625,6 +625,7 @@ const projectFieldsSchema = z.object({
   expectedReturnPct: z.coerce.number().positive(),
   durationDays: z.coerce.number().int().positive(),
   imageUrl: z.preprocess(emptyToUndefined, z.string().url().optional()),
+  allowDuplicatePurchase: z.boolean().optional().default(false),
 });
 
 adminRouter.post("/projects", requirePermission("projects.manage"), async (req: AuthedRequest, res) => {
@@ -647,6 +648,7 @@ adminRouter.post("/projects", requirePermission("projects.manage"), async (req: 
         expectedReturnPct: data.expectedReturnPct.toString(),
         durationDays: data.durationDays.toString(),
         imageUrl: data.imageUrl,
+        allowDuplicatePurchase: data.allowDuplicatePurchase,
       })
       .returning();
 
@@ -680,6 +682,7 @@ adminRouter.patch("/projects/:projectId", requirePermission("projects.manage"), 
         expectedReturnPct: data.expectedReturnPct.toString(),
         durationDays: data.durationDays.toString(),
         imageUrl: data.imageUrl ?? null,
+        allowDuplicatePurchase: data.allowDuplicatePurchase,
         updatedAt: new Date(),
       })
       .where(eq(projects.id, projectId))
@@ -842,6 +845,7 @@ adminRouter.post("/packages", requirePermission("projects.manage"), async (req: 
         expectedReturnPct: data.expectedReturnPct.toString(),
         durationDays: data.durationDays.toString(),
         imageUrl: data.imageUrl,
+        allowDuplicatePurchase: data.allowDuplicatePurchase,
       })
       .returning();
 
@@ -874,6 +878,7 @@ adminRouter.patch("/packages/:packageId", requirePermission("projects.manage"), 
         expectedReturnPct: data.expectedReturnPct.toString(),
         durationDays: data.durationDays.toString(),
         imageUrl: data.imageUrl,
+        allowDuplicatePurchase: data.allowDuplicatePurchase,
         updatedAt: new Date(),
       })
       .where(eq(projects.id, req.params.packageId))
@@ -929,21 +934,50 @@ adminRouter.post("/packages/:packageId/active", requirePermission("projects.mana
 
 adminRouter.get("/financials/dashboard", requirePermission("payments.manage"), async (req: AuthedRequest, res) => {
   try {
+    const investorCountResult = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(users)
+      .where(eq(users.role, "investor"));
+
+    // Cancelled investments returned their capital — they aren't money
+    // currently/ever actually invested, so they're excluded from the total.
     const investedResult = await db
       .select({
         total: sql<string>`SUM(amount_ghs)`,
       })
-      .from(investments);
+      .from(investments)
+      .where(sql`${investments.status} != 'cancelled'`);
 
     const paidOutResult = await db
       .select({ total: sql<string>`SUM(amount_ghs)` })
       .from(walletTransactions)
       .where(eq(walletTransactions.type, "payout"));
 
+    // All-time, completed only — a running total that only grows, not a
+    // daily figure that resets at midnight.
     const depositedResult = await db
-      .select({ total: sql<string>`SUM(balance_after_ghs)` })
+      .select({ total: sql<string>`SUM(amount_ghs)` })
       .from(walletTransactions)
-      .where(eq(walletTransactions.type, "deposit"));
+      .where(
+        and(
+          eq(walletTransactions.type, "deposit"),
+          eq(walletTransactions.status, "completed"),
+        ),
+      );
+
+    // Today only (calendar day) — tracked separately from the all-time
+    // total above so daily cash inflow can be watched without losing the
+    // running total.
+    const todayDepositedResult = await db
+      .select({ total: sql<string>`SUM(amount_ghs)` })
+      .from(walletTransactions)
+      .where(
+        and(
+          eq(walletTransactions.type, "deposit"),
+          eq(walletTransactions.status, "completed"),
+          gte(walletTransactions.createdAt, sql`date_trunc('day', now())`),
+        ),
+      );
 
     const dailyPayouts = await db
       .select({ count: sql<number>`count(*)`, total: sql<string>`SUM(amount_ghs)` })
@@ -968,13 +1002,36 @@ adminRouter.get("/financials/dashboard", requirePermission("payments.manage"), a
         ),
       );
 
+    // Live sum of every wallet's current balance — not a ledger total, so
+    // it's inherently real-time (no day-scoping to apply or remove).
+    const walletBalanceResult = await db
+      .select({ total: sql<string>`SUM(balance_ghs)` })
+      .from(wallets);
+
+    const investedByPackage = await db
+      .select({
+        packageId: projects.id,
+        packageTitle: projects.title,
+        investorCount: sql<number>`count(distinct ${investments.userId})`,
+        totalInvestedGhs: sql<string>`SUM(${investments.amountGhs})`,
+      })
+      .from(investments)
+      .innerJoin(projects, eq(projects.id, investments.projectId))
+      .where(sql`${investments.status} != 'cancelled'`)
+      .groupBy(projects.id, projects.title)
+      .orderBy(desc(sql`SUM(${investments.amountGhs})`));
+
     res.json({
+      totalInvestors: investorCountResult[0]?.count || 0,
       aum: investedResult[0]?.total || "0",
       totalDeposits: depositedResult[0]?.total || "0",
+      todayDeposits: todayDepositedResult[0]?.total || "0",
       totalPayouts: paidOutResult[0]?.total || "0",
       totalWithdrawals: withdrawnResult[0]?.total || "0",
+      totalWalletBalance: walletBalanceResult[0]?.total || "0",
       dailyPayoutsCount: dailyPayouts[0]?.count || 0,
       dailyPayoutsAmount: dailyPayouts[0]?.total || "0",
+      investedByPackage,
     });
   } catch (error) {
     console.error("Error fetching financial dashboard:", error);
