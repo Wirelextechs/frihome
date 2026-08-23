@@ -27,6 +27,7 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Sheet, SheetContent } from "../components/ui/sheet";
+import { LaunchDaysBanner } from "../components/LaunchDaysBanner";
 import {
   Select,
   SelectContent,
@@ -270,6 +271,7 @@ export function DashboardPage() {
       </div>
 
       <div className="mt-7 space-y-7">
+      <LaunchDaysBanner />
       {user?.kycStatus !== "verified" && (
         <div className="flex items-start gap-3 rounded-3xl bg-amber-50 px-4 py-3.5 shadow-soft">
           <ShieldAlert size={18} className="mt-0.5 shrink-0 text-amber-600" />

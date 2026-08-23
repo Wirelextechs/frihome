@@ -210,7 +210,12 @@ export function Layout() {
       <main
         className={`mx-auto w-full max-w-sm px-4 pt-16 sm:px-6 ${user ? "pb-32" : "pb-8"}`}
       >
-        <LaunchDaysBanner />
+        {/* Hero pages (e.g. Dashboard) bleed their own background up under
+            the fixed header via a negative top margin, which assumes it's
+            the very first thing in this flow — rendering the banner here
+            would get dragged up and overlapped along with it. Those pages
+            render their own LaunchDaysBanner inside their normal content. */}
+        {!onHero && <LaunchDaysBanner />}
         <Outlet />
       </main>
 
