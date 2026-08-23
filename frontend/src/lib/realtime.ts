@@ -39,3 +39,31 @@ export function subscribeToChatThread(
     supabase.removeChannel(channel);
   };
 }
+
+export interface UserNotificationEvent {
+  type: "notification";
+  notificationId: string;
+  title: string;
+  body: string;
+}
+
+// Per-user channel that fires the instant a new notification is created
+// server-side, regardless of which page is open. Used to play a sound and
+// vibrate immediately, ahead of the next unread-count poll. No-op when
+// realtime isn't configured.
+export function subscribeToUserNotifications(
+  userId: string,
+  onEvent: (event: UserNotificationEvent) => void,
+): () => void {
+  if (!supabase) return () => {};
+  const channel = supabase
+    .channel(`user-notifications-${userId}`)
+    .on("broadcast", { event: "notification" }, (msg) =>
+      onEvent(msg.payload as UserNotificationEvent),
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}

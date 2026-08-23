@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { users } from "../db/schema.js";
+import { users, supportSettings } from "../db/schema.js";
 import {
   hashPassword,
   verifyPassword,
@@ -10,6 +10,8 @@ import {
   signRefreshToken,
 } from "../lib/auth.js";
 import { applyReferralCode } from "../lib/referrals.js";
+import { sendSms } from "../lib/moolreSms.js";
+import { getSmsRules } from "../lib/smsSettings.js";
 
 export const authRouter = Router();
 
@@ -85,6 +87,19 @@ authRouter.post("/signup", async (req, res) => {
     await applyReferralCode(user.id, referralCode).catch((err) =>
       console.error("Failed to apply referral code:", err),
     );
+  }
+
+  const smsRules = await getSmsRules();
+  if (smsRules.registrationConfirmedEnabled) {
+    const loginUrl = `${process.env.FRONTEND_URL ?? "https://afrihome.app"}/login`;
+    const [support] = await db.select().from(supportSettings).limit(1);
+    const whatsappUrl = support?.whatsappChannelUrl?.trim();
+
+    let message = `Welcome to AfriHome, ${user.fullName.split(" ")[0]}! Your account has been created successfully. Log in: ${loginUrl}`;
+    if (whatsappUrl) {
+      message += ` Join our WhatsApp channel: ${whatsappUrl}`;
+    }
+    await sendSms(user.phone, message);
   }
 
   const accessToken = signAccessToken({ userId: user.id, role: user.role });

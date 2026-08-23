@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { ArrowRight, Lock, Phone, ShieldCheck } from "lucide-react";
+import { Lock, Phone } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
 import { useAuthStore } from "../lib/store";
@@ -31,69 +31,51 @@ export function LoginPage() {
   }
 
   return (
-    <div className="pb-6">
-      <div className="-mx-4 -mt-16 rounded-b-[2rem] bg-gradient-to-br from-primary to-sky-600 px-4 pb-12 pt-24 text-center sm:-mx-6 sm:px-6">
-        <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-white/15 text-white">
-          <ShieldCheck size={26} />
+    <div className="mx-auto w-full max-w-sm py-8">
+      <h1 className="text-2xl font-bold tracking-tight text-ink-900">
+        Sign in
+      </h1>
+      <p className="mt-1 text-sm text-ink-500">
+        Enter your details to access your account.
+      </p>
+
+      <form onSubmit={handleSubmit} className="mt-8 space-y-4">
+        <div>
+          <Label htmlFor="phone">Phone number</Label>
+          <Input
+            id="phone"
+            type="tel"
+            required
+            autoComplete="tel"
+            icon={<Phone size={18} />}
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="+233 5X XXX XXXX"
+          />
         </div>
-        <h1 className="mt-4 text-2xl font-extrabold tracking-tight text-white">
-          Welcome back
-        </h1>
-        <p className="mt-1 text-sm text-white/50">
-          Log in to keep growing your portfolio.
-        </p>
-      </div>
 
-      <div className="relative -mt-6 rounded-2xl border border-border bg-card p-5 shadow-soft-lg">
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <Label htmlFor="phone">Phone number</Label>
-            <Input
-              id="phone"
-              type="tel"
-              required
-              autoComplete="tel"
-              icon={<Phone size={18} />}
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder="+233 5X XXX XXXX"
-            />
-          </div>
+        <div>
+          <Label htmlFor="password">Password</Label>
+          <Input
+            id="password"
+            type="password"
+            required
+            autoComplete="current-password"
+            icon={<Lock size={18} />}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="••••••••"
+          />
+        </div>
 
-          <div>
-            <Label htmlFor="password">Password</Label>
-            <Input
-              id="password"
-              type="password"
-              required
-              autoComplete="current-password"
-              icon={<Lock size={18} />}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-            />
-          </div>
+        <Button type="submit" size="lg" disabled={loading} className="w-full">
+          {loading ? "Signing in…" : "Sign in"}
+        </Button>
+      </form>
 
-          <Button
-            type="submit"
-            size="lg"
-            disabled={loading}
-            className="w-full"
-          >
-            {loading ? "Logging in…" : "Log in"}
-            {!loading && <ArrowRight size={16} />}
-          </Button>
-        </form>
-
-        <p className="mt-4 flex items-center justify-center gap-1.5 text-xs text-ink-400">
-          <ShieldCheck size={13} />
-          Your details are encrypted and never shared
-        </p>
-      </div>
-
-      <p className="mt-5 text-center text-sm text-ink-500">
-        No account?{" "}
-        <Link to="/signup" className="font-semibold text-primary">
+      <p className="mt-6 text-center text-sm text-ink-500">
+        Don't have an account?{" "}
+        <Link to="/signup" className="font-bold text-ink-900 hover:underline">
           Sign up
         </Link>
       </p>

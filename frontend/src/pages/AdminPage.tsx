@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import { useAuthStore } from "../lib/store";
 import { api } from "../lib/api";
 import {
@@ -17,18 +18,37 @@ import {
   Megaphone,
   Headphones,
   MessageSquare,
+  MessageCircle,
   SlidersHorizontal,
+  Receipt,
+  Wallet,
   Menu,
   X,
 } from "lucide-react";
+import { NotificationBell } from "../components/NotificationBell";
+import { InvestedByPackageModal, type InvestedByPackageRow } from "../components/InvestedByPackageModal";
 
 interface DashboardData {
+  totalInvestors: number;
   aum: string;
   totalDeposits: string;
+  todayDeposits: string;
   totalPayouts: string;
   totalWithdrawals: string;
+  totalWalletBalance: string;
   dailyPayoutsCount: number;
   dailyPayoutsAmount: string;
+  investedByPackage: InvestedByPackageRow[];
+}
+
+// "YYYY-MM-DD" for a date input, in local time (not UTC — avoids the date
+// silently shifting a day when the browser and server timezones differ).
+function toDateInputValue(iso: string): string {
+  const d = new Date(iso);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 export function AdminPage() {
@@ -37,6 +57,31 @@ export function AdminPage() {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [showInvestedModal, setShowInvestedModal] = useState(false);
+
+  const [launchDate, setLaunchDate] = useState("");
+  const [savingLaunchDate, setSavingLaunchDate] = useState(false);
+  useEffect(() => {
+    if (user?.role !== "admin") return;
+    api
+      .get("/api/admin/platform-settings")
+      .then(({ data }) => setLaunchDate(toDateInputValue(data.data.launchDate)))
+      .catch(() => {});
+  }, [user]);
+
+  async function handleSaveLaunchDate() {
+    if (!launchDate) return;
+    try {
+      setSavingLaunchDate(true);
+      const { data } = await api.put("/api/admin/platform-settings", { launchDate });
+      setLaunchDate(toDateInputValue(data.data.launchDate));
+      toast.success("Launch date updated");
+    } catch (error: any) {
+      toast.error(error.response?.data?.error ?? "Failed to update launch date");
+    } finally {
+      setSavingLaunchDate(false);
+    }
+  }
 
   useEffect(() => {
     if (user?.role !== "admin") {
@@ -87,16 +132,35 @@ export function AdminPage() {
 
   const cards = [
     {
-      title: "AUM",
+      title: "Total Investors",
+      value: dashboard?.totalInvestors,
+      icon: Users,
+      onClick: () => navigate("/admin/users"),
+      isCount: true,
+    },
+    {
+      title: "Total Invested",
       value: dashboard?.aum,
       icon: DollarSign,
-      onClick: () => navigate("/admin/financials"),
+      onClick: () => setShowInvestedModal(true),
     },
     {
       title: "Total Deposits",
       value: dashboard?.totalDeposits,
       icon: CreditCard,
       onClick: () => navigate("/admin/payments"),
+    },
+    {
+      title: "Today's Deposits",
+      value: dashboard?.todayDeposits,
+      icon: CreditCard,
+      onClick: () => navigate("/admin/payments"),
+    },
+    {
+      title: "Total Wallet Balance",
+      value: dashboard?.totalWalletBalance,
+      icon: Wallet,
+      onClick: () => navigate("/admin/users"),
     },
     {
       title: "Total Payouts",
@@ -110,12 +174,6 @@ export function AdminPage() {
       icon: CreditCard,
       onClick: () => navigate("/admin/withdrawals"),
     },
-    {
-      title: "Today's Payouts",
-      value: `${dashboard?.dailyPayoutsCount || 0} txns`,
-      icon: BarChart3,
-      onClick: () => navigate("/admin/withdrawals"),
-    },
   ];
 
   const navItems = [
@@ -126,9 +184,12 @@ export function AdminPage() {
     { label: "Financials", icon: DollarSign, to: "/admin/financials" },
     { label: "Payments", icon: CreditCard, to: "/admin/payments" },
     { label: "Withdrawals", icon: CreditCard, to: "/admin/withdrawals" },
+    { label: "Withdrawal Requirements", icon: SlidersHorizontal, to: "/admin/withdrawal-requirements" },
+    { label: "Transactions", icon: Receipt, to: "/admin/transactions" },
     { label: "ROI Reconciliation", icon: Scale, to: "/admin/roi" },
     { label: "Referral Program", icon: Gift, to: "/admin/referrals" },
     { label: "Mobile Money Deposits", icon: Smartphone, to: "/admin/deposits" },
+    { label: "SMS Notifications", icon: MessageCircle, to: "/admin/sms" },
     { label: "Reward Pools", icon: Trophy, to: "/admin/rewards" },
     { label: "Announcements", icon: Megaphone, to: "/admin/announcements" },
     { label: "Support Links", icon: Headphones, to: "/admin/support" },
@@ -138,7 +199,7 @@ export function AdminPage() {
 
   // Most-used destinations, surfaced as a bottom nav on small screens
   const quickNav = [
-    { label: "Chats", icon: MessageSquare, to: "/admin/chats" },
+    { label: "Transactions", icon: Receipt, to: "/admin/transactions" },
     { label: "Rewards", icon: Trophy, to: "/admin/rewards" },
     { label: "Deposits", icon: Smartphone, to: "/admin/deposits" },
     { label: "Users", icon: Users, to: "/admin/users" },
@@ -159,6 +220,7 @@ export function AdminPage() {
             <h1 className="text-lg font-bold sm:text-xl">Admin Dashboard</h1>
           </div>
           <div className="flex items-center gap-2">
+            <NotificationBell buttonClassName="border-transparent bg-primary/10 text-primary hover:bg-primary/20" />
             <button
               onClick={() => navigate("/admin/chats")}
               className="relative flex items-center gap-2 rounded-full bg-primary/10 px-3 py-2 text-sm font-medium text-primary transition hover:bg-primary/20"
@@ -256,13 +318,13 @@ export function AdminPage() {
             <h2 className="mb-6 text-xl font-bold sm:text-2xl">Financial Overview</h2>
 
             {loading ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                {[...Array(4)].map((_, i) => (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {[...Array(7)].map((_, i) => (
                   <div key={i} className="h-32 bg-ink-100 rounded-lg animate-pulse" />
                 ))}
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {cards.map((card) => {
                   const Icon = card.icon;
                   return (
@@ -277,7 +339,11 @@ export function AdminPage() {
                             {card.title}
                           </p>
                           <p className="text-2xl font-bold text-ink-900 mt-2">
-                            {card.value ? `₵${parseFloat(card.value || "0").toFixed(2)}` : "—"}
+                            {card.isCount
+                              ? card.value ?? "—"
+                              : card.value
+                                ? `₵${parseFloat(String(card.value)).toFixed(2)}`
+                                : "—"}
                           </p>
                         </div>
                         <Icon size={24} className="text-primary/50" />
@@ -317,6 +383,29 @@ export function AdminPage() {
                 </button>
               </div>
             </div>
+
+            <div className="mt-6 p-6 rounded-lg border border-border bg-card">
+              <h3 className="text-lg font-bold mb-1">Platform Launch Date</h3>
+              <p className="text-sm text-ink-500 mb-4">
+                Drives the "days in operation" banner investors see. Adjust it
+                any time.
+              </p>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <input
+                  type="date"
+                  value={launchDate}
+                  onChange={(e) => setLaunchDate(e.target.value)}
+                  className="rounded-lg border border-border bg-background px-3 py-2.5 text-sm"
+                />
+                <button
+                  onClick={handleSaveLaunchDate}
+                  disabled={savingLaunchDate || !launchDate}
+                  className="rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-50"
+                >
+                  {savingLaunchDate ? "Saving…" : "Save"}
+                </button>
+              </div>
+            </div>
           </div>
         </main>
       </div>
@@ -343,6 +432,13 @@ export function AdminPage() {
           ))}
         </div>
       </nav>
+
+      {showInvestedModal && (
+        <InvestedByPackageModal
+          rows={dashboard?.investedByPackage ?? []}
+          onClose={() => setShowInvestedModal(false)}
+        />
+      )}
     </div>
   );
 }

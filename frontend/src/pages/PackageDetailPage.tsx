@@ -80,9 +80,9 @@ export function PackageDetailPage() {
         Back
       </button>
 
-      <div className={`overflow-hidden rounded-2xl bg-gradient-to-br p-6 shadow-soft-lg ${gradient}`}>
+      <div className={`overflow-hidden rounded-[1.75rem] bg-gradient-to-br p-6 shadow-float ${gradient}`}>
         <div className="flex items-start justify-between">
-          <p className={`text-xs font-bold uppercase tracking-[0.15em] ${textMuted}`}>
+          <p className={`font-display text-sm font-bold uppercase tracking-[0.15em] ${textMain}`}>
             {pkg.title}
           </p>
           <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${pill} ${textMain}`}>

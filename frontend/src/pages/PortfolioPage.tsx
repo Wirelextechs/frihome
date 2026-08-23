@@ -49,7 +49,7 @@ export function PortfolioPage() {
   return (
     <div className="space-y-5 py-2 animate-in fade-in-0 duration-300">
       <div>
-        <h1 className="text-2xl font-extrabold tracking-tight text-ink-900">
+        <h1 className="font-display text-2xl font-bold tracking-tight text-ink-900">
           My investments
         </h1>
         <p className="mt-1 text-sm text-ink-500">

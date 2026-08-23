@@ -35,7 +35,7 @@ export function PackagesPage() {
   return (
     <div className="space-y-5 py-2 animate-in fade-in-0 duration-300">
       <div>
-        <h1 className="text-2xl font-extrabold tracking-tight text-ink-900">
+        <h1 className="font-display text-2xl font-bold tracking-tight text-ink-900">
           Packages
         </h1>
         <p className="mt-1 text-sm text-ink-500">
@@ -76,31 +76,31 @@ export function PackagesPage() {
             <Link
               key={p.id}
               to={`/packages/${p.id}`}
-              className={`block overflow-hidden rounded-2xl bg-gradient-to-br p-5 shadow-soft-lg transition active:scale-[0.98] ${gradient}`}
+              className={`block overflow-hidden rounded-[1.75rem] bg-gradient-to-br p-5 shadow-float transition active:scale-[0.98] ${gradient}`}
             >
               <div className="flex items-start justify-between">
-                <p className={`text-xs font-bold uppercase tracking-[0.15em] ${textMuted}`}>
+                <p className={`font-display text-sm font-bold uppercase tracking-[0.15em] ${textMain}`}>
                   {p.title}
                 </p>
-                <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${pill} ${textMain}`}>
+                <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${pill} ${textMain}`}>
                   {Number(p.durationDays)} days
                 </span>
               </div>
 
-              <p className={`mt-3 text-3xl font-extrabold tracking-tight ${textMain}`}>
+              <p className={`mt-4 font-display text-3xl font-bold tracking-tight ${textMain}`}>
                 ₵{Number(p.amountGhs).toLocaleString()}
               </p>
               <p className={`text-xs font-medium ${textMuted}`}>invested</p>
 
               <div className={`mt-4 flex items-center justify-between border-t pt-3 ${divider}`}>
                 <div>
-                  <p className={`text-lg font-bold ${textMain}`}>
+                  <p className={`font-display text-lg font-bold ${textMain}`}>
                     {Number(p.expectedReturnPct)}%
                   </p>
                   <p className={`text-[11px] ${textMuted}`}>total return</p>
                 </div>
                 <div className="text-right">
-                  <p className={`text-lg font-bold ${textMain}`}>
+                  <p className={`font-display text-lg font-bold ${textMain}`}>
                     ₵{dailyRoi(p).toLocaleString()}
                   </p>
                   <p className={`text-[11px] ${textMuted}`}>per day</p>

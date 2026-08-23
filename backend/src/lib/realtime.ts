@@ -34,3 +34,31 @@ export async function publishChatEvent(
   });
   await supabase.removeChannel(channel);
 }
+
+// Separate per-user channel (not per chat thread) so any open tab — chat
+// page or not — can play a sound/vibrate the instant a new notification is
+// created, without polling. This is the "foreground" half of notifications;
+// web push (lib/webPush.ts) covers the closed-tab/backgrounded case.
+export interface UserNotificationEvent {
+  type: "notification";
+  notificationId: string;
+  title: string;
+  body: string;
+}
+
+function channelForUserNotifications(userId: string) {
+  return supabase.channel(`user-notifications-${userId}`);
+}
+
+export async function publishUserNotification(
+  userId: string,
+  event: UserNotificationEvent,
+) {
+  const channel = channelForUserNotifications(userId);
+  await channel.send({
+    type: "broadcast",
+    event: event.type,
+    payload: event,
+  });
+  await supabase.removeChannel(channel);
+}

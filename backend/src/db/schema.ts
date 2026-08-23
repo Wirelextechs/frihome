@@ -117,6 +117,7 @@ export const users = pgTable("users", {
   role: userRoleEnum("role").notNull().default("investor"),
   kycStatus: kycStatusEnum("kyc_status").notNull().default("pending"),
   isSuspended: boolean("is_suspended").notNull().default(false),
+  lastSeenAt: timestamp("last_seen_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -165,6 +166,9 @@ export const projects = pgTable("projects", {
   durationDays: numeric("duration_days", { precision: 6, scale: 0 }).notNull(),
   imageUrl: text("image_url"),
   isActive: boolean("is_active").notNull().default(true),
+  // Off by default: a user may only hold one investment (any status) in a
+  // given package. Admins tick this per-package to allow repeat purchases.
+  allowDuplicatePurchase: boolean("allow_duplicate_purchase").notNull().default(false),
   fundingStatus: fundingStatusEnum("funding_status").notNull().default("open"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -631,4 +635,146 @@ export const paymentSettings = pgTable("payment_settings", {
   withdrawalStartTime: varchar("withdrawal_start_time", { length: 5 }),
   withdrawalEndTime: varchar("withdrawal_end_time", { length: 5 }),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// Site-wide launch date, shown as a "days in operation" banner to investors.
+export const platformSettings = pgTable("platform_settings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  launchDate: timestamp("launch_date").notNull().defaultNow(),
+  updatedBy: uuid("updated_by").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// Which SMS notifications are sent to users; admin-controlled.
+export const smsSettings = pgTable("sms_settings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  registrationConfirmedEnabled: boolean("registration_confirmed_enabled")
+    .notNull()
+    .default(true),
+  withdrawalRequestedEnabled: boolean("withdrawal_requested_enabled")
+    .notNull()
+    .default(true),
+  withdrawalApprovedEnabled: boolean("withdrawal_approved_enabled")
+    .notNull()
+    .default(true),
+  depositConfirmedEnabled: boolean("deposit_confirmed_enabled")
+    .notNull()
+    .default(true),
+  referralRewardEnabled: boolean("referral_reward_enabled")
+    .notNull()
+    .default(true),
+  suspiciousAdjustmentEnabled: boolean("suspicious_adjustment_enabled")
+    .notNull()
+    .default(true),
+  packagePurchaseEnabled: boolean("package_purchase_enabled")
+    .notNull()
+    .default(true),
+  // New chat message SMS'd to the other side when they're not currently
+  // active on the site; deposit review SMS'd to adminAlertPhone.
+  chatMessageEnabled: boolean("chat_message_enabled").notNull().default(true),
+  depositReviewEnabled: boolean("deposit_review_enabled")
+    .notNull()
+    .default(true),
+  // Where "needs admin attention" alerts go (new deposit, unclaimed/offline
+  // chat message) when no specific admin is already handling it — a list so
+  // more than one admin can be alerted.
+  adminAlertPhone: varchar("admin_alert_phone", { length: 20 }),
+  adminAlertPhones: jsonb("admin_alert_phones").$type<string[]>().notNull().default([]),
+  updatedBy: uuid("updated_by").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const smsBroadcastStatusEnum = pgEnum("sms_broadcast_status", [
+  "pending",
+  "in_progress",
+  "completed",
+  "failed",
+]);
+
+// One row per admin-initiated SMS broadcast, so send history/results can be
+// reviewed later (target vs. sent vs. failed, timestamps, the message sent).
+export const smsBroadcasts = pgTable("sms_broadcasts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  message: text("message").notNull(),
+  targetCount: integer("target_count").notNull(),
+  sentCount: integer("sent_count").notNull().default(0),
+  failedCount: integer("failed_count").notNull().default(0),
+  status: smsBroadcastStatusEnum("status").notNull().default("pending"),
+  errorMessage: text("error_message"),
+  createdBy: uuid("created_by").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  completedAt: timestamp("completed_at"),
+});
+
+// Admin-configurable gates on withdrawals by turn number (1st, 2nd, 3rd...).
+// Several rows can share a turnNumber as alternative (OR) rules — a user
+// only needs to satisfy ONE of the rules for that turn. minPackageId is the
+// package whose minInvestmentGhs sets the tier floor: a direct invite
+// "qualifies" for a rule if their own active package's minInvestmentGhs is
+// at least that floor (packages have no explicit tier field, so price is
+// used as the tier proxy, per how "packages" already work elsewhere).
+export const withdrawalRequirements = pgTable("withdrawal_requirements", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  turnNumber: smallint("turn_number").notNull(),
+  minDirectInvites: integer("min_direct_invites").notNull(),
+  minPackageId: uuid("min_package_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "restrict" }),
+  isActive: boolean("is_active").notNull().default(true),
+  updatedBy: uuid("updated_by").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const notificationTypeEnum = pgEnum("notification_type", [
+  "chat_message",
+  "deposit_submitted",
+  "deposit_approved",
+  "deposit_rejected",
+  "withdrawal_requested",
+  "withdrawal_approved",
+  "withdrawal_rejected",
+  "wallet_adjustment",
+  "referral_reward",
+]);
+
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    type: notificationTypeEnum("type").notNull(),
+    title: varchar("title", { length: 200 }).notNull(),
+    body: text("body").notNull(),
+    data: jsonb("data").$type<Record<string, string>>(),
+    readAt: timestamp("read_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    userCreatedIdx: index("notifications_user_created_idx").on(
+      t.userId,
+      t.createdAt,
+    ),
+  }),
+);
+
+export const pushSubscriptions = pgTable("push_subscriptions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  endpoint: text("endpoint").notNull().unique(),
+  p256dh: text("p256dh").notNull(),
+  auth: text("auth").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
 });

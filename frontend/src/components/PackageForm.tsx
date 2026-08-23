@@ -5,6 +5,7 @@ export interface PackageFormValues {
   minInvestmentGhs: string;
   expectedReturnPct: string;
   durationDays: string;
+  allowDuplicatePurchase: boolean;
 }
 
 const emptyValues: PackageFormValues = {
@@ -12,6 +13,7 @@ const emptyValues: PackageFormValues = {
   minInvestmentGhs: "",
   expectedReturnPct: "",
   durationDays: "",
+  allowDuplicatePurchase: false,
 };
 
 interface PackageFormProps {
@@ -132,6 +134,27 @@ export function PackageForm({
           </div>
         </div>
       </div>
+
+      {/* Duplicate purchase toggle */}
+      <label className="md:col-span-2 flex cursor-pointer items-center justify-between gap-4 rounded-lg border border-border px-4 py-3 transition hover:border-primary/30">
+        <div>
+          <p className="text-sm font-semibold text-ink-900">
+            Allow duplicate purchase
+          </p>
+          <p className="text-xs text-ink-500">
+            When off, a user can only invest in this package once. When on,
+            they can buy into it multiple times.
+          </p>
+        </div>
+        <input
+          type="checkbox"
+          checked={form.allowDuplicatePurchase}
+          onChange={(e) =>
+            setForm({ ...form, allowDuplicatePurchase: e.target.checked })
+          }
+          className="h-5 w-5 shrink-0 accent-primary"
+        />
+      </label>
 
       {/* Submit & Cancel */}
       <div className="md:col-span-2 flex gap-3">

@@ -1,8 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import {
-  ArrowDownToLine,
-  ArrowUpFromLine,
   Building2,
   CheckCircle2,
   Coins,
@@ -29,6 +27,7 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Sheet, SheetContent } from "../components/ui/sheet";
+import { LaunchDaysBanner } from "../components/LaunchDaysBanner";
 import {
   Select,
   SelectContent,
@@ -82,15 +81,10 @@ const QUICK_ACTIONS: {
   to: string;
   label: string;
   icon: typeof Building2;
-  tile: string;
-  fg: string;
 }[] = [
-  { to: "/packages", label: "Invest", icon: Building2, tile: "bg-sky-100", fg: "text-sky-600" },
-  { to: "/wallet", label: "Add money", icon: ArrowDownToLine, tile: "bg-emerald-100", fg: "text-emerald-600" },
-  { to: "/wallet", label: "Withdraw", icon: ArrowUpFromLine, tile: "bg-amber-100", fg: "text-amber-600" },
-  { to: "/about", label: "About us", icon: Info, tile: "bg-violet-100", fg: "text-violet-600" },
-  { to: "/referrals", label: "Refer & earn", icon: Gift, tile: "bg-rose-100", fg: "text-rose-600" },
-  { to: "/wallet", label: "Rewards", icon: Trophy, tile: "bg-indigo-100", fg: "text-indigo-600" },
+  { to: "/wallet", label: "Rewards", icon: Trophy },
+  { to: "/referrals", label: "Refer & earn", icon: Gift },
+  { to: "/about", label: "About us", icon: Info },
 ];
 
 export function DashboardPage() {
@@ -220,51 +214,66 @@ export function DashboardPage() {
 
   return (
     <div className="pb-2 animate-in fade-in-0 duration-300">
-      <div className="-mx-4 -mt-16 bg-gradient-to-br from-primary to-sky-600 px-4 pb-14 pt-24 text-white sm:-mx-6 sm:px-6">
+      <div className="-mx-4 -mt-16 bg-gradient-to-b from-brand-950 via-brand-900 to-brand-800 px-4 pb-20 pt-24 text-white sm:-mx-6 sm:px-6">
         {loading ? (
-          <Skeleton className="h-20 w-56 rounded-xl bg-white/20" />
+          <Skeleton className="h-24 w-full rounded-2xl bg-white/10" />
         ) : (
           <div>
-            <p className="text-sm text-white/70">Available balance</p>
-            <p className="mt-1 text-[2.75rem] font-extrabold leading-none tracking-tight">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-brand-300/80">
+              Available balance
+            </p>
+            <p className="mt-2 font-display text-[2.6rem] font-bold leading-none tracking-tight">
               {formatCurrency(convertFromGhs(balanceGhs, currency), currency)}
             </p>
-            <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-sm">
-              <TrendingUp size={15} />
-              <span className="font-semibold">
-                {formatCurrency(
-                  convertFromGhs(Number(portfolio?.totalInvestedGhs ?? 0), currency),
-                  currency,
-                )}
-              </span>
-              <span className="text-white/70">invested</span>
+            <div className="mt-6 grid grid-cols-2 gap-3">
+              <div className="rounded-2xl bg-white/[0.08] px-4 py-3 backdrop-blur-sm">
+                <p className="flex items-center gap-1 text-[11px] font-semibold text-brand-200/70">
+                  <TrendingUp size={12} /> Invested
+                </p>
+                <p className="mt-0.5 font-display text-lg font-bold">
+                  {formatCurrency(
+                    convertFromGhs(Number(portfolio?.totalInvestedGhs ?? 0), currency),
+                    currency,
+                  )}
+                </p>
+              </div>
+              <div className="rounded-2xl bg-white/[0.08] px-4 py-3 backdrop-blur-sm">
+                <p className="flex items-center gap-1 text-[11px] font-semibold text-brand-200/70">
+                  <Trophy size={12} /> Returns
+                </p>
+                <p className="mt-0.5 font-display text-lg font-bold">
+                  {formatCurrency(
+                    convertFromGhs(Number(portfolio?.totalReturnsGhs ?? 0), currency),
+                    currency,
+                  )}
+                </p>
+              </div>
             </div>
           </div>
         )}
       </div>
 
-      <div className="relative -mt-8 rounded-2xl border border-border bg-card p-4 shadow-soft-lg">
-        <div className="grid grid-cols-3 gap-x-2 gap-y-4">
-          {QUICK_ACTIONS.map(({ to, label, icon: Icon, tile, fg }) => (
-            <Link
-              key={label}
-              to={to}
-              className="flex flex-col items-center gap-2 transition active:scale-95"
-            >
-              <span className={`grid h-12 w-12 place-items-center rounded-2xl ${tile} ${fg}`}>
-                <Icon size={20} strokeWidth={2.1} />
-              </span>
-              <span className="text-center text-[11px] font-semibold leading-tight text-ink-700">
-                {label}
-              </span>
-            </Link>
-          ))}
-        </div>
+      <div className="relative -mt-7 grid grid-cols-3 gap-2">
+        {QUICK_ACTIONS.map(({ to, label, icon: Icon }) => (
+          <Link
+            key={label}
+            to={to}
+            className="flex flex-col items-center gap-1.5 rounded-2xl bg-card px-1.5 py-3 text-center shadow-soft transition active:scale-95"
+          >
+            <span className="grid h-8 w-8 place-items-center rounded-full bg-accent text-accent-foreground">
+              <Icon size={14} strokeWidth={2.4} />
+            </span>
+            <span className="text-[11px] font-bold leading-tight text-ink-800">
+              {label}
+            </span>
+          </Link>
+        ))}
       </div>
 
-      <div className="mt-6 space-y-6">
+      <div className="mt-7 space-y-7">
+      <LaunchDaysBanner />
       {user?.kycStatus !== "verified" && (
-        <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3.5">
+        <div className="flex items-start gap-3 rounded-3xl bg-amber-50 px-4 py-3.5 shadow-soft">
           <ShieldAlert size={18} className="mt-0.5 shrink-0 text-amber-600" />
           <div className="flex-1 text-sm text-amber-800">
             {user?.kycStatus === "pending"
@@ -279,74 +288,67 @@ export function DashboardPage() {
         </div>
       )}
 
-      <Card className="p-4">
-        <div className="flex items-center gap-3">
-          <div className="grid h-12 w-12 place-items-center rounded-full bg-accent text-accent-foreground">
-            <UserIcon size={22} />
+      <section>
+        <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.18em] text-ink-400">
+          Profile
+        </p>
+        <Card className="p-5">
+          <div className="flex items-center gap-3">
+            <div className="grid h-12 w-12 place-items-center rounded-2xl bg-brand-950 text-white">
+              <UserIcon size={20} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="truncate font-display font-bold text-ink-900">
+                {user?.fullName}
+              </p>
+              <p className="truncate text-xs text-ink-500">{user?.phone}</p>
+            </div>
+            <Badge
+              variant={kycBadgeVariant[user?.kycStatus ?? "pending"]}
+              className="capitalize"
+            >
+              {user?.kycStatus}
+            </Badge>
           </div>
-          <div className="min-w-0 flex-1">
-            <p className="truncate font-bold text-ink-900">{user?.fullName}</p>
-            <p className="truncate text-xs text-ink-500">{user?.phone}</p>
-          </div>
-        </div>
-        <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
-          <div>
-            <dt className="text-xs text-ink-400">Country</dt>
-            <dd className="font-medium text-ink-900">{countryName}</dd>
-          </div>
-          <div>
-            <dt className="text-xs text-ink-400">Preferred currency</dt>
-            <dd className="font-medium text-ink-900">
-              {user?.preferredCurrency}
-            </dd>
-          </div>
-          <div className="col-span-2">
-            <dt className="text-xs text-ink-400">KYC status</dt>
-            <dd className="mt-1">
-              <Badge
-                variant={kycBadgeVariant[user?.kycStatus ?? "pending"]}
-                className="capitalize"
-              >
-                {user?.kycStatus}
-              </Badge>
-            </dd>
-          </div>
-        </dl>
-      </Card>
+          <dl className="mt-4 grid grid-cols-2 gap-3 border-t border-border/60 pt-4 text-sm">
+            <div>
+              <dt className="text-xs text-ink-400">Country</dt>
+              <dd className="font-semibold text-ink-900">{countryName}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-ink-400">Preferred currency</dt>
+              <dd className="font-semibold text-ink-900">
+                {user?.preferredCurrency}
+              </dd>
+            </div>
+          </dl>
+        </Card>
+      </section>
 
-      <div>
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-bold text-ink-900">
-            Withdrawal methods
-          </h2>
-          <button
-            onClick={openForm}
-            className="flex items-center gap-1 text-sm font-semibold text-primary active:scale-95 transition"
-          >
-            <Plus size={15} />
-            Add
-          </button>
-        </div>
+      <section>
+        <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.18em] text-ink-400">
+          Payout accounts
+        </p>
 
         {methodsLoading ? (
           <Skeleton className="h-16" />
         ) : methods.length === 0 ? (
           <p className="text-sm text-ink-400">No withdrawal methods yet.</p>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-2.5">
             {methods.map((m) => {
               const Icon = methodIcon[m.type];
               return (
-                <Card key={m.id} className="flex items-center justify-between px-4 py-3">
+                <Card key={m.id} className="flex items-center justify-between px-4 py-3.5">
                   <div className="flex items-center gap-3">
-                    <div className="grid h-9 w-9 place-items-center rounded-xl bg-ink-50 text-ink-500">
+                    <div className="grid h-10 w-10 place-items-center rounded-2xl bg-accent text-accent-foreground">
                       <Icon size={16} />
                     </div>
                     <div>
-                      <p className="text-sm font-semibold text-ink-900">
+                      <p className="text-sm font-bold text-ink-900">
                         {m.accountName}
                         {m.isDefault && (
-                          <Badge className="ml-2 text-[10px]">Default</Badge>
+                          <Badge className="ml-2 text-[9px]">Default</Badge>
                         )}
                       </p>
                       <p className="text-xs text-ink-400">
@@ -366,7 +368,17 @@ export function DashboardPage() {
             })}
           </div>
         )}
-      </div>
+
+        <Button
+          variant="tonal"
+          size="lg"
+          onClick={openForm}
+          className="mt-3 w-full"
+        >
+          <Plus size={16} />
+          Add payout account
+        </Button>
+      </section>
       </div>
 
       <Sheet open={showForm} onOpenChange={setShowForm}>

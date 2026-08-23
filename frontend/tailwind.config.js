@@ -6,10 +6,17 @@ export default {
     extend: {
       fontFamily: {
         sans: [
-          "Inter",
+          "Manrope",
           "-apple-system",
           "BlinkMacSystemFont",
           "Segoe UI",
+          "sans-serif",
+        ],
+        display: [
+          "Sora",
+          "Manrope",
+          "-apple-system",
+          "BlinkMacSystemFont",
           "sans-serif",
         ],
       },
@@ -74,6 +81,9 @@ export default {
           foreground: "hsl(var(--popover-foreground))",
         },
       },
+      spacing: {
+        13: "3.25rem",
+      },
       borderRadius: {
         "4xl": "2rem",
         lg: "var(--radius)",
@@ -81,9 +91,12 @@ export default {
         sm: "calc(var(--radius) - 4px)",
       },
       boxShadow: {
-        soft: "0 1px 2px rgba(20, 23, 30, 0.04), 0 8px 24px -8px rgba(20, 23, 30, 0.10)",
+        soft: "0 2px 6px rgba(3, 46, 35, 0.05), 0 12px 32px -12px rgba(3, 46, 35, 0.12)",
         "soft-lg":
-          "0 2px 4px rgba(20, 23, 30, 0.04), 0 16px 40px -12px rgba(20, 23, 30, 0.16)",
+          "0 4px 10px rgba(3, 46, 35, 0.06), 0 24px 56px -16px rgba(3, 46, 35, 0.20)",
+        float:
+          "0 8px 20px -6px rgba(3, 46, 35, 0.18), 0 24px 64px -20px rgba(3, 46, 35, 0.28)",
+        press: "inset 0 2px 6px rgba(3, 46, 35, 0.12)",
       },
       keyframes: {
         "sheet-in": {
@@ -102,12 +115,17 @@ export default {
           from: { opacity: 1 },
           to: { opacity: 0 },
         },
+        shimmer: {
+          "0%": { backgroundPosition: "0% 50%" },
+          "100%": { backgroundPosition: "200% 50%" },
+        },
       },
       animation: {
         "sheet-in": "sheet-in 0.28s cubic-bezier(0.32, 0.72, 0, 1)",
         "sheet-out": "sheet-out 0.2s cubic-bezier(0.32, 0.72, 0, 1)",
         "overlay-in": "overlay-in 0.2s ease-out",
         "overlay-out": "overlay-out 0.2s ease-in",
+        shimmer: "shimmer 3s linear infinite",
       },
     },
   },

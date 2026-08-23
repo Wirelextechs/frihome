@@ -87,7 +87,7 @@ export function KycPage() {
         <div className="mb-3 grid h-11 w-11 place-items-center rounded-xl bg-ink-900 text-white">
           <ShieldCheck size={20} />
         </div>
-        <h1 className="text-2xl font-extrabold tracking-tight text-ink-900">
+        <h1 className="font-display text-2xl font-bold tracking-tight text-ink-900">
           Verify your identity
         </h1>
         <p className="mt-1 text-sm text-ink-500">

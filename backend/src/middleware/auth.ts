@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, or } from "drizzle-orm";
 import { verifyToken, type JwtPayload } from "../lib/auth.js";
 import { db } from "../db/index.js";
 import { adminPermissions, users } from "../db/schema.js";
@@ -7,6 +7,12 @@ import { adminPermissions, users } from "../db/schema.js";
 export interface AuthedRequest extends Request {
   user?: JwtPayload;
 }
+
+// How stale lastSeenAt must be before we bother writing again (avoids a
+// write on every single request) and, separately, how stale it must be
+// before we consider someone "not on the site" for SMS fallback purposes.
+const PRESENCE_WRITE_THROTTLE_MS = 60_000;
+export const PRESENCE_OFFLINE_THRESHOLD_MS = 2 * 60_000;
 
 export async function requireAuth(
   req: AuthedRequest,
@@ -42,6 +48,20 @@ export async function requireAuth(
       return res.status(403).json({ error: "This account has been suspended" });
     }
     req.user = { userId: payload.userId, role: account.role };
+
+    // Fire-and-forget presence heartbeat, throttled so it's not a write on
+    // every request. Never blocks or fails the actual request.
+    const throttleCutoff = new Date(Date.now() - PRESENCE_WRITE_THROTTLE_MS);
+    db.update(users)
+      .set({ lastSeenAt: new Date() })
+      .where(
+        and(
+          eq(users.id, payload.userId),
+          or(isNull(users.lastSeenAt), lt(users.lastSeenAt, throttleCutoff)),
+        ),
+      )
+      .catch((err) => console.error("Presence heartbeat failed:", err));
+
     next();
   } catch (error) {
     console.error("Auth account lookup failed:", error);
@@ -76,6 +96,7 @@ export const ADMIN_SCOPES = [
   "support.manage",
   "chats.manage",
   "payments.manage",
+  "sms.manage",
 ] as const;
 
 export type AdminScope = (typeof ADMIN_SCOPES)[number];

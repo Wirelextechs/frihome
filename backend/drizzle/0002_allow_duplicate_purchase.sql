@@ -1,0 +1,1 @@
+ALTER TABLE "projects" ADD COLUMN "allow_duplicate_purchase" boolean DEFAULT false NOT NULL;

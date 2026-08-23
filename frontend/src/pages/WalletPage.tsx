@@ -8,8 +8,10 @@ import {
   Coins,
   CreditCard,
   Gift,
+  MessageCircle,
   RefreshCcw,
   Smartphone,
+  Trophy,
   TrendingUp,
   Wallet as WalletIcon,
 } from "lucide-react";
@@ -77,6 +79,17 @@ interface WithdrawalMethod {
   accountNumber: string | null;
   cryptoAddress: string | null;
 }
+
+const DEPOSIT_METHOD_META: {
+  value: "momo" | "crypto" | "binancePay" | "chat";
+  label: string;
+  icon: typeof Smartphone;
+}[] = [
+  { value: "chat", label: "Live Chat (Momo)", icon: MessageCircle },
+  { value: "momo", label: "Mobile Money", icon: Smartphone },
+  { value: "crypto", label: "USDT (Crypto)", icon: Coins },
+  { value: "binancePay", label: "Binance Pay", icon: CreditCard },
+];
 
 const METHOD_TYPES: {
   type: "momo" | "bank" | "crypto";
@@ -176,36 +189,47 @@ function RewardsTabContent({ onClaimed }: { onClaimed: () => void }) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h3 className="mb-3 text-sm font-bold text-ink-700 uppercase">Claim a Reward</h3>
-        <form onSubmit={handleClaim} className="space-y-3">
-          <div>
-            <Label htmlFor="rewardCode">Reward Code</Label>
-            <Input
-              id="rewardCode"
-              value={claimCode}
-              onChange={(e) => setClaimCode(e.target.value)}
-              placeholder="AH-XXXXXXXX"
-              disabled={claiming}
-            />
-          </div>
-          <Button
-            type="submit"
-            size="lg"
-            disabled={claiming}
-            className="w-full"
-          >
-            {claiming ? "Claiming..." : "Claim Reward"}
-          </Button>
-        </form>
+      <div className="flex flex-col items-center gap-2 pb-1 text-center">
+        <span className="grid h-12 w-12 place-items-center rounded-full bg-accent text-accent-foreground">
+          <Trophy size={20} />
+        </span>
+        <div>
+          <h3 className="text-sm font-bold text-ink-900">Claim a reward</h3>
+          <p className="text-xs text-ink-400">
+            Enter a code shared with you to claim your share
+          </p>
+        </div>
       </div>
+      <form onSubmit={handleClaim} className="space-y-3">
+        <div>
+          <Label htmlFor="rewardCode">Reward code</Label>
+          <Input
+            id="rewardCode"
+            value={claimCode}
+            onChange={(e) => setClaimCode(e.target.value)}
+            placeholder="AH-XXXXXXXX"
+            disabled={claiming}
+            className="text-center font-display text-base font-bold tracking-widest"
+          />
+        </div>
+        <Button
+          type="submit"
+          size="lg"
+          disabled={claiming}
+          className="w-full"
+        >
+          {claiming ? "Claiming…" : "Claim reward"}
+        </Button>
+      </form>
 
       {lastClaimResult && lastClaimResult.status === "success" && (
-        <Card className="border-green-200 bg-green-50 p-4 text-green-900">
-          <p className="text-sm font-medium">
-            ✓ Claimed ₵{lastClaimResult.claimAmount?.toFixed(2)}! Check your wallet — it'll show up in Recent transactions below.
+        <div className="flex items-start gap-3 rounded-2xl bg-accent p-4">
+          <Trophy size={18} className="mt-0.5 shrink-0 text-accent-foreground" />
+          <p className="text-sm font-medium text-accent-foreground">
+            Claimed ₵{lastClaimResult.claimAmount?.toFixed(2)}! It'll show up
+            in Recent transactions below.
           </p>
-        </Card>
+        </div>
       )}
     </div>
   );
@@ -606,7 +630,7 @@ export function WalletPage() {
   return (
     <div className="space-y-5 py-2 animate-in fade-in-0 duration-300">
       <div>
-        <h1 className="text-2xl font-extrabold tracking-tight text-ink-900">
+        <h1 className="font-display text-2xl font-bold tracking-tight text-ink-900">
           Wallet
         </h1>
         <p className="mt-1 text-sm text-ink-500">
@@ -614,12 +638,13 @@ export function WalletPage() {
         </p>
       </div>
 
-      <div className="overflow-hidden rounded-2xl bg-gradient-to-br from-primary to-sky-600 p-5 text-white shadow-soft-lg">
-        <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-white/70">
-          <WalletIcon size={14} />
+      <div className="relative overflow-hidden rounded-[2rem] bg-gradient-to-b from-brand-950 to-brand-800 p-6 text-white shadow-float">
+        <span className="absolute -right-6 -top-8 h-32 w-32 rounded-full bg-primary/20 blur-2xl" />
+        <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-brand-300/80">
+          <WalletIcon size={13} />
           Available balance
         </p>
-        <p className="mt-1 text-3xl font-extrabold tracking-tight">
+        <p className="mt-2 font-display text-4xl font-bold tracking-tight">
           {formatCurrency(convertFromGhs(balance, currency), currency)}
         </p>
       </div>
@@ -748,28 +773,39 @@ export function WalletPage() {
               </div>
               <div>
                 <Label>Method</Label>
-                <Select
-                  value={depositMethod}
-                  onValueChange={(v) => setDepositMethod(v as typeof depositMethod)}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {enabledDepositMethods.momo && (
-                      <SelectItem value="momo">Mobile Money</SelectItem>
-                    )}
-                    {enabledDepositMethods.crypto && (
-                      <SelectItem value="crypto">USDT (Crypto)</SelectItem>
-                    )}
-                    {enabledDepositMethods.binancePay && (
-                      <SelectItem value="binancePay">Binance Pay</SelectItem>
-                    )}
-                    {enabledDepositMethods.chat && (
-                      <SelectItem value="chat">Live Chat(Momo)</SelectItem>
-                    )}
-                  </SelectContent>
-                </Select>
+                <div className="grid grid-cols-2 gap-2">
+                  {DEPOSIT_METHOD_META.filter((m) => enabledDepositMethods[m.value]).map(
+                    ({ value, label, icon: Icon }) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setDepositMethod(value)}
+                        className={`flex items-center gap-2.5 rounded-2xl border-2 px-3 py-3 text-left transition active:scale-[0.97] ${
+                          depositMethod === value
+                            ? "border-primary bg-accent"
+                            : "border-transparent bg-ink-50 hover:bg-ink-100"
+                        }`}
+                      >
+                        <span
+                          className={`grid h-9 w-9 shrink-0 place-items-center rounded-full ${
+                            depositMethod === value
+                              ? "bg-primary text-white"
+                              : "bg-white text-ink-500 shadow-soft"
+                          }`}
+                        >
+                          <Icon size={16} />
+                        </span>
+                        <span
+                          className={`text-xs font-bold leading-tight ${
+                            depositMethod === value ? "text-accent-foreground" : "text-ink-700"
+                          }`}
+                        >
+                          {label}
+                        </span>
+                      </button>
+                    ),
+                  )}
+                </div>
                 {depositMethod === "momo" && (
                   <p className="mt-1.5 text-xs text-ink-400">
                     You'll pay to our mobile money account and upload proof —
@@ -841,13 +877,19 @@ export function WalletPage() {
                   key={type}
                   type="button"
                   onClick={() => setWithdrawType(type)}
-                  className={`flex flex-col items-center gap-1.5 rounded-xl border px-2 py-3 text-xs font-semibold transition active:scale-95 ${
+                  className={`flex flex-col items-center gap-2 rounded-2xl border-2 py-3.5 text-xs font-bold transition active:scale-[0.97] ${
                     withdrawType === type
                       ? "border-primary bg-accent text-accent-foreground"
-                      : "border-border bg-card text-ink-500 hover:border-ink-300"
+                      : "border-transparent bg-ink-50 text-ink-500 hover:bg-ink-100"
                   }`}
                 >
-                  <Icon size={18} />
+                  <span
+                    className={`grid h-9 w-9 place-items-center rounded-full ${
+                      withdrawType === type ? "bg-primary text-white" : "bg-white shadow-soft"
+                    }`}
+                  >
+                    <Icon size={16} />
+                  </span>
                   {label}
                 </button>
               ))}
@@ -969,44 +1011,55 @@ export function WalletPage() {
       </Tabs>
 
       <div>
-        <h2 className="mb-3 text-sm font-bold text-ink-900">
+        <h2 className="mb-3 text-[11px] font-bold uppercase tracking-[0.18em] text-ink-400">
           Recent transactions
         </h2>
         {transactions.length === 0 ? (
           <p className="text-sm text-ink-400">No transactions yet.</p>
         ) : (
           <div className="space-y-2">
-            {transactions.map((tx) => (
-              <button
-                key={tx.id}
-                type="button"
-                onClick={() => setSelectedTx(tx)}
-                className="block w-full text-left active:scale-[0.99] transition"
-              >
-                <Card className="flex items-center justify-between px-4 py-3 transition hover:border-primary/30">
-                  <div>
-                    <p className="text-sm font-semibold text-ink-900">
-                      {typeLabels[tx.type] ?? tx.type}
-                    </p>
-                    <p className="text-xs text-ink-400">
-                      {new Date(tx.createdAt).toLocaleDateString()}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm font-semibold text-ink-900">
-                      {DEBIT_TYPES.has(tx.type) ? "-" : "+"}
-                      {formatCurrency(
-                        convertFromGhs(Number(tx.amountGhs), currency),
-                        currency,
-                      )}
-                    </p>
-                    <Badge variant={statusVariant[tx.status]} className="text-[10px]">
-                      {tx.status}
-                    </Badge>
-                  </div>
-                </Card>
-              </button>
-            ))}
+            {transactions.map((tx) => {
+              const Icon = typeIcon[tx.type] ?? WalletIcon;
+              const isDebit = DEBIT_TYPES.has(tx.type);
+              return (
+                <button
+                  key={tx.id}
+                  type="button"
+                  onClick={() => setSelectedTx(tx)}
+                  className="block w-full text-left active:scale-[0.99] transition"
+                >
+                  <Card className="flex items-center gap-3 px-4 py-3 transition hover:shadow-soft-lg">
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent text-accent-foreground">
+                      <Icon size={16} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-ink-900">
+                        {typeLabels[tx.type] ?? tx.type}
+                      </p>
+                      <p className="text-xs text-ink-400">
+                        {new Date(tx.createdAt).toLocaleDateString()}
+                      </p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p
+                        className={`text-sm font-bold ${
+                          isDebit ? "text-ink-900" : "text-primary"
+                        }`}
+                      >
+                        {isDebit ? "-" : "+"}
+                        {formatCurrency(
+                          convertFromGhs(Number(tx.amountGhs), currency),
+                          currency,
+                        )}
+                      </p>
+                      <Badge variant={statusVariant[tx.status]} className="text-[10px]">
+                        {tx.status}
+                      </Badge>
+                    </div>
+                  </Card>
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
@@ -1023,7 +1076,7 @@ export function WalletPage() {
                     <div className="grid h-14 w-14 place-items-center rounded-full bg-accent text-accent-foreground">
                       <Icon size={24} />
                     </div>
-                    <p className="text-2xl font-extrabold tracking-tight text-ink-900">
+                    <p className="font-display text-2xl font-bold tracking-tight text-ink-900">
                       {isCredit ? "+" : "-"}
                       {formatCurrency(
                         convertFromGhs(Number(selectedTx.amountGhs), currency),
@@ -1112,7 +1165,7 @@ export function WalletPage() {
                 <p className="text-xs font-medium uppercase tracking-wide text-ink-400">
                   Amount to send
                 </p>
-                <p className="mt-1 text-2xl font-extrabold tracking-tight text-ink-900">
+                <p className="mt-1 font-display text-2xl font-bold tracking-tight text-ink-900">
                   {cryptoInvoice.payAmount} {cryptoInvoice.payCurrency?.toUpperCase()}
                 </p>
               </div>

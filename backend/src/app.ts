@@ -15,6 +15,8 @@ import { announcementsRouter } from "./routes/announcements.js";
 import { supportRouter } from "./routes/support.js";
 import { paymentRulesRouter } from "./routes/paymentRules.js";
 import { chatRouter } from "./routes/chat.js";
+import { platformRouter } from "./routes/platform.js";
+import { notificationsRouter } from "./routes/notifications.js";
 
 // An unhandled rejection anywhere in the app (e.g. a payment provider's API
 // timing out) crashes the whole Node process by default since Node 15 —
@@ -52,5 +54,7 @@ app.use("/api/announcements", announcementsRouter);
 app.use("/api/support", supportRouter);
 app.use("/api/payment-rules", paymentRulesRouter);
 app.use("/api/chat", chatRouter);
+app.use("/api/platform", platformRouter);
+app.use("/api/notifications", notificationsRouter);
 
 export default app;

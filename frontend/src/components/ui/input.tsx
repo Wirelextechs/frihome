@@ -11,17 +11,17 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
   ({ className, icon, prefixLabel, trailing, ...props }, ref) => {
     if (icon || prefixLabel || trailing) {
       return (
-        <div className="flex items-center gap-2 rounded-xl border border-input bg-card px-4 py-3 shadow-soft transition focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20">
+        <div className="flex items-center gap-2 rounded-2xl bg-input px-4 py-3.5 transition focus-within:bg-white focus-within:ring-2 focus-within:ring-primary/40 dark:focus-within:bg-ink-950">
           {icon && <span className="shrink-0 text-ink-400">{icon}</span>}
           {prefixLabel && (
-            <span className="shrink-0 text-sm font-medium text-ink-500">
+            <span className="shrink-0 text-sm font-semibold text-ink-500">
               {prefixLabel}
             </span>
           )}
           <input
             ref={ref}
             className={cn(
-              "w-full bg-transparent text-sm text-ink-900 outline-none placeholder:text-ink-300",
+              "w-full bg-transparent text-sm font-medium text-ink-900 outline-none placeholder:text-ink-400/70",
               className,
             )}
             {...props}
@@ -35,7 +35,7 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
       <input
         ref={ref}
         className={cn(
-          "flex h-12 w-full rounded-xl border border-input bg-card px-4 text-sm text-ink-900 shadow-soft outline-none transition placeholder:text-ink-300 focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50",
+          "flex h-13 w-full rounded-2xl bg-input px-4 py-3.5 text-sm font-medium text-ink-900 outline-none transition placeholder:text-ink-400/70 focus:bg-white focus:ring-2 focus:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:bg-ink-950",
           className,
         )}
         {...props}
