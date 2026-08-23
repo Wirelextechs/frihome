@@ -1039,6 +1039,44 @@ adminRouter.get("/financials/dashboard", requirePermission("payments.manage"), a
   }
 });
 
+// One row per investor holding a (non-cancelled) investment in this
+// package — the drill-down from the "Total Invested by Package" modal.
+// A user who bought in more than once (allowDuplicatePurchase) shows up
+// once with their investments summed, so the list stays one-row-per-person.
+adminRouter.get(
+  "/packages/:packageId/investors",
+  requirePermission("payments.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const rows = await db
+        .select({
+          userId: users.id,
+          fullName: users.fullName,
+          phone: users.phone,
+          kycStatus: users.kycStatus,
+          totalInvestedGhs: sql<string>`SUM(${investments.amountGhs})`,
+          investmentCount: sql<number>`count(*)`,
+          firstInvestedAt: sql<string>`MIN(${investments.createdAt})`,
+        })
+        .from(investments)
+        .innerJoin(users, eq(users.id, investments.userId))
+        .where(
+          and(
+            eq(investments.projectId, req.params.packageId),
+            sql`${investments.status} != 'cancelled'`,
+          ),
+        )
+        .groupBy(users.id, users.fullName, users.phone, users.kycStatus)
+        .orderBy(desc(sql`SUM(${investments.amountGhs})`));
+
+      res.json({ data: rows });
+    } catch (error) {
+      console.error("Error fetching package investors:", error);
+      res.status(500).json({ error: "Failed to fetch package investors" });
+    }
+  },
+);
+
 // ============ PAYMENTS & CRYPTO ============
 
 adminRouter.get("/payments/crypto", requirePermission("payments.manage"), async (req: AuthedRequest, res) => {

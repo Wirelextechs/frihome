@@ -1,5 +1,6 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { X } from "lucide-react";
+import { PackageInvestorsModal } from "./PackageInvestorsModal";
 
 export interface InvestedByPackageRow {
   packageId: string;
@@ -15,13 +16,15 @@ export function InvestedByPackageModal({
   rows: InvestedByPackageRow[];
   onClose: () => void;
 }) {
+  const [viewPackage, setViewPackage] = useState<{ id: string; title: string } | null>(null);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape" && !viewPackage) onClose();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, viewPackage]);
 
   const grandTotal = rows.reduce((sum, r) => sum + parseFloat(r.totalInvestedGhs || "0"), 0);
 
@@ -58,7 +61,13 @@ export function InvestedByPackageModal({
                 </thead>
                 <tbody>
                   {rows.map((row) => (
-                    <tr key={row.packageId} className="border-b border-border/50">
+                    <tr
+                      key={row.packageId}
+                      onClick={() =>
+                        setViewPackage({ id: row.packageId, title: row.packageTitle })
+                      }
+                      className="cursor-pointer border-b border-border/50 transition hover:bg-ink-50/60"
+                    >
                       <td className="px-3 py-2.5 text-sm font-medium text-ink-900">{row.packageTitle}</td>
                       <td className="px-3 py-2.5 text-right text-sm text-ink-700">{row.investorCount}</td>
                       <td className="px-3 py-2.5 text-right text-sm font-semibold text-ink-900">
@@ -72,6 +81,14 @@ export function InvestedByPackageModal({
           )}
         </div>
       </div>
+
+      {viewPackage && (
+        <PackageInvestorsModal
+          packageId={viewPackage.id}
+          packageTitle={viewPackage.title}
+          onClose={() => setViewPackage(null)}
+        />
+      )}
     </div>
   );
 }
