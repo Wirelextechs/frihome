@@ -70,7 +70,13 @@ export function AdminChatsPage() {
         if (initial && !cancelled) toast.error("Failed to load chats");
       } finally {
         inFlightRef.current = false;
-        if (initial && !cancelled) setLoading(false);
+        // Not gated on `cancelled`: inFlightRef already prevents duplicate
+        // concurrent fetches, and gating this on the per-effect-invocation
+        // `cancelled` flag causes the loading state to hang forever under
+        // React 18 StrictMode's dev-only double-invoke (the first
+        // invocation's fetch resolves after its own cleanup already flipped
+        // `cancelled` true, so it would never clear the flag).
+        if (initial) setLoading(false);
       }
     }
 

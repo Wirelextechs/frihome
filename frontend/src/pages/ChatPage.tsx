@@ -196,7 +196,10 @@ export function ChatPage() {
         if (initial && !cancelled) toast.error("Failed to load chat");
       } finally {
         inFlightRef.current = false;
-        if (initial && !cancelled) setLoading(false);
+        // Not gated on `cancelled` — see AdminChatsPage.tsx for why: under
+        // React 18 StrictMode's dev-only double-invoke, gating this on the
+        // per-effect-invocation `cancelled` flag leaves loading stuck true.
+        if (initial) setLoading(false);
       }
     }
 
