@@ -1996,6 +1996,7 @@ adminRouter.get("/deposit-methods", requirePermission("deposits.manage"), async 
         chatEnabled: row?.chatEnabled ?? true,
         binancePayEnabled: row?.binancePayEnabled ?? true,
         paymentLinkEnabled: row?.paymentLinkEnabled ?? true,
+        defaultMethod: row?.defaultMethod ?? null,
       },
     });
   } catch (error) {
@@ -2010,6 +2011,7 @@ const depositMethodsSchema = z.object({
   chatEnabled: z.boolean(),
   binancePayEnabled: z.boolean(),
   paymentLinkEnabled: z.boolean(),
+  defaultMethod: z.enum(["chat", "momo", "crypto", "binancePay", "paymentLink"]).nullable(),
 });
 
 adminRouter.put(

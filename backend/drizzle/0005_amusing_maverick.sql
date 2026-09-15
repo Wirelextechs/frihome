@@ -1,0 +1,1 @@
+ALTER TABLE "deposit_method_settings" ADD COLUMN "default_method" varchar(60);

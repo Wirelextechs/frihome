@@ -55,9 +55,26 @@ interface DepositMethods {
   chatEnabled: boolean;
   binancePayEnabled: boolean;
   paymentLinkEnabled: boolean;
+  defaultMethod: "chat" | "momo" | "crypto" | "binancePay" | "paymentLink" | null;
 }
 
-const METHOD_OPTIONS: { key: keyof DepositMethods; label: string; hint: string }[] = [
+const DEFAULT_METHOD_OPTIONS: {
+  value: NonNullable<DepositMethods["defaultMethod"]>;
+  label: string;
+  enabledKey: keyof DepositMethods;
+}[] = [
+  { value: "chat", label: "Live Chat", enabledKey: "chatEnabled" },
+  { value: "momo", label: "Mobile Money", enabledKey: "momoEnabled" },
+  { value: "crypto", label: "USDT (Crypto)", enabledKey: "cryptoEnabled" },
+  { value: "binancePay", label: "Binance Pay", enabledKey: "binancePayEnabled" },
+  { value: "paymentLink", label: "Payment Link", enabledKey: "paymentLinkEnabled" },
+];
+
+const METHOD_OPTIONS: {
+  key: Exclude<keyof DepositMethods, "defaultMethod">;
+  label: string;
+  hint: string;
+}[] = [
   {
     key: "momoEnabled",
     label: "Mobile Money",
@@ -98,6 +115,7 @@ export function AdminDepositsPage() {
     chatEnabled: true,
     binancePayEnabled: true,
     paymentLinkEnabled: true,
+    defaultMethod: null,
   });
   const [savingMethods, setSavingMethods] = useState(false);
   const [pending, setPending] = useState<PendingDeposit[]>([]);
@@ -320,6 +338,34 @@ export function AdminDepositsPage() {
                 />
               </label>
             ))}
+          </div>
+
+          <div className="mt-5 border-t border-border pt-5">
+            <label className="text-sm font-semibold text-ink-900">
+              Preselected method
+            </label>
+            <p className="mb-2 text-xs text-ink-500">
+              Which method is picked by default when a user opens the Deposit
+              tab. Leave on "Automatic" to use the app's built-in order.
+            </p>
+            <select
+              value={methods.defaultMethod ?? ""}
+              disabled={savingMethods}
+              onChange={(e) =>
+                handleSaveMethods({
+                  ...methods,
+                  defaultMethod: (e.target.value || null) as DepositMethods["defaultMethod"],
+                })
+              }
+              className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm"
+            >
+              <option value="">Automatic</option>
+              {DEFAULT_METHOD_OPTIONS.filter((o) => methods[o.enabledKey]).map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 

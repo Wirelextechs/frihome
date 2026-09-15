@@ -256,9 +256,14 @@ export function WalletPage() {
   const [loading, setLoading] = useState(true);
 
   const [depositAmount, setDepositAmount] = useState("");
+  // Starts unset ("") — the "assign initial selection" effect below picks
+  // the admin's configured default (or the automatic fallback order) once
+  // methods have loaded. Assigning a fallback before that has loaded would
+  // let the "already valid, don't reassign" guard lock it in permanently,
+  // since the correct default would arrive too late to override it.
   const [depositMethod, setDepositMethod] = useState<
-    "momo" | "bank" | "crypto" | "chat" | "binancePay" | "paymentLink"
-  >("chat");
+    "" | "momo" | "bank" | "crypto" | "chat" | "binancePay" | "paymentLink"
+  >("");
   // Contact number sent along with a live-chat top-up request
   const [depositPhone, setDepositPhone] = useState(user?.phone ?? "");
   const [depositLoading, setDepositLoading] = useState(false);
@@ -271,6 +276,9 @@ export function WalletPage() {
     binancePay: boolean;
     paymentLink: boolean;
   }>({ momo: true, crypto: true, chat: true, binancePay: true, paymentLink: true });
+  // Admin-configured preselected method; null means "use the automatic order".
+  const [defaultDepositMethod, setDefaultDepositMethod] = useState<string | null>(null);
+  const [depositMethodsLoaded, setDepositMethodsLoaded] = useState(false);
 
   useEffect(() => {
     api
@@ -283,29 +291,37 @@ export function WalletPage() {
           binancePay: data.binancePay ?? true,
           paymentLink: data.paymentLink ?? true,
         });
+        setDefaultDepositMethod(data.defaultMethod ?? null);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setDepositMethodsLoaded(true));
   }, []);
 
-  // Keep the selected method valid when the admin has hidden it.
+  // Keep the selected method valid when the admin has hidden it, and assign
+  // the initial selection (admin's configured default if valid, else the
+  // automatic order) once methods have loaded.
   useEffect(() => {
-    const order: ("momo" | "crypto" | "chat" | "binancePay" | "paymentLink")[] = [
+    if (!depositMethodsLoaded) return;
+
+    const order: ("chat" | "momo" | "crypto" | "binancePay" | "paymentLink")[] = [
       "chat",
       "momo",
       "crypto",
       "binancePay",
       "paymentLink",
     ];
-    if (
-      depositMethod !== "bank" &&
-      !enabledDepositMethods[
-        depositMethod as "momo" | "crypto" | "chat" | "binancePay" | "paymentLink"
-      ]
-    ) {
-      const first = order.find((m) => enabledDepositMethods[m]);
-      if (first) setDepositMethod(first);
+    const isEnabled = (m: string) =>
+      m !== "" && m !== "bank" && enabledDepositMethods[m as (typeof order)[number]];
+
+    if (depositMethod !== "" && isEnabled(depositMethod)) return;
+
+    if (defaultDepositMethod && isEnabled(defaultDepositMethod)) {
+      setDepositMethod(defaultDepositMethod as (typeof order)[number]);
+      return;
     }
-  }, [enabledDepositMethods, depositMethod]);
+    const first = order.find(isEnabled);
+    if (first) setDepositMethod(first);
+  }, [depositMethodsLoaded, enabledDepositMethods, depositMethod, defaultDepositMethod]);
 
   const availableMethodTypes = useMemo(
     () => METHOD_TYPES.filter((m) => m.type === "crypto" || isGhana),
@@ -351,7 +367,7 @@ export function WalletPage() {
   // being submitted.
   function validateDepositAmount(
     amount: number,
-    method: "momo" | "bank" | "crypto" | "chat" | "binancePay" | "paymentLink",
+    method: "" | "momo" | "bank" | "crypto" | "chat" | "binancePay" | "paymentLink",
   ): string | null {
     if (!(amount > 0)) return "Enter a valid amount";
     if (!paymentRules) return null;

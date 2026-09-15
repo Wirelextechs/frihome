@@ -380,6 +380,7 @@ walletRouter.get("/deposit-methods", requireAuth, async (_req, res) => {
       chat: row?.chatEnabled ?? true,
       binancePay: row?.binancePayEnabled ?? true,
       paymentLink: row?.paymentLinkEnabled ?? true,
+      defaultMethod: row?.defaultMethod ?? null,
     });
   } catch (error) {
     console.error("Error fetching deposit methods:", error);

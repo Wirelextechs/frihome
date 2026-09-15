@@ -36,6 +36,13 @@
       "when": 1789433099777,
       "tag": "0004_handy_steel_serpent",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1789467760987,
+      "tag": "0005_amusing_maverick",
+      "breakpoints": true
     }
   ]
 }

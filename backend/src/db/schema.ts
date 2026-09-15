@@ -411,6 +411,10 @@ export const depositMethodSettings = pgTable("deposit_method_settings", {
   chatEnabled: boolean("chat_enabled").notNull().default(true),
   binancePayEnabled: boolean("binance_pay_enabled").notNull().default(true),
   paymentLinkEnabled: boolean("payment_link_enabled").notNull().default(true),
+  // Which method is preselected when a user opens the Deposit tab — one of
+  // "chat" | "momo" | "crypto" | "binancePay" | "paymentLink", or null to
+  // fall back to the app's automatic order.
+  defaultMethod: varchar("default_method", { length: 60 }),
   updatedBy: uuid("updated_by").references(() => users.id, {
     onDelete: "set null",
   }),
