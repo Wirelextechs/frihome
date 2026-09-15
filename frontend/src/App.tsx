@@ -48,6 +48,16 @@ function RequireAuth({ children }: { children: JSX.Element }) {
   return children;
 }
 
+// Investors who end up with an /admin/* URL (a stale notification, a typed
+// link, a bookmark from before a demotion) get bounced to their dashboard
+// instead of the admin page shell rendering for them.
+function RequireAdmin({ children }: { children: JSX.Element }) {
+  const user = useAuthStore((s) => s.user);
+  if (!user) return <Navigate to="/login" replace />;
+  if (user.role !== "admin") return <Navigate to="/dashboard" replace />;
+  return children;
+}
+
 function Landing() {
   const user = useAuthStore((s) => s.user);
   if (user) return <Navigate to="/dashboard" replace />;
@@ -129,201 +139,201 @@ export default function App() {
       <Route
         path="/admin"
         element={
-          <RequireAuth>
+          <RequireAdmin>
             <AdminPage />
-          </RequireAuth>
+          </RequireAdmin>
         }
       />
       <Route
         path="/admin/users"
         element={
-          <RequireAuth>
+          <RequireAdmin>
             <AdminUsersPage />
-          </RequireAuth>
+          </RequireAdmin>
         }
       />
       <Route
         path="/admin/kyc"
         element={
-          <RequireAuth>
+          <RequireAdmin>
             <AdminKycPage />
-          </RequireAuth>
+          </RequireAdmin>
         }
       />
       <Route
         path="/admin/packages"
         element={
-          <RequireAuth>
+          <RequireAdmin>
             <AdminPackagesPage />
-          </RequireAuth>
+          </RequireAdmin>
         }
       />
       <Route
         path="/admin/packages/:packageId"
         element={
-          <RequireAuth>
+          <RequireAdmin>
             <AdminPackageEditPage />
-          </RequireAuth>
+          </RequireAdmin>
         }
       />
       <Route
         path="/admin/financials"
         element={
-          <RequireAuth>
+          <RequireAdmin>
             <AdminFinancialsPage />
-          </RequireAuth>
+          </RequireAdmin>
         }
       />
       <Route
         path="/admin/payments"
         element={
-          <RequireAuth>
+          <RequireAdmin>
             <AdminPaymentsPage />
-          </RequireAuth>
+          </RequireAdmin>
         }
       />
       <Route
         path="/admin/payments/:paymentId"
         element={
-          <RequireAuth>
+          <RequireAdmin>
             <AdminPaymentDetailPage />
-          </RequireAuth>
+          </RequireAdmin>
         }
       />
       <Route
         path="/admin/withdrawals"
         element={
-          <RequireAuth>
+          <RequireAdmin>
             <AdminWithdrawalsPage />
-          </RequireAuth>
+          </RequireAdmin>
         }
       />
       <Route
         path="/admin/withdrawals/:txnId"
         element={
-          <RequireAuth>
+          <RequireAdmin>
             <AdminWithdrawalDetailPage />
-          </RequireAuth>
+          </RequireAdmin>
         }
       />
       <Route
         path="/admin/roi"
         element={
-          <RequireAuth>
+          <RequireAdmin>
             <AdminRoiPage />
-          </RequireAuth>
+          </RequireAdmin>
         }
       />
       <Route
         path="/admin/roi/:investmentId"
         element={
-          <RequireAuth>
+          <RequireAdmin>
             <AdminRoiDetailPage />
-          </RequireAuth>
+          </RequireAdmin>
         }
       />
       <Route
         path="/admin/referrals"
         element={
-          <RequireAuth>
+          <RequireAdmin>
             <AdminReferralConfigPage />
-          </RequireAuth>
+          </RequireAdmin>
         }
       />
       <Route
         path="/admin/deposits"
         element={
-          <RequireAuth>
+          <RequireAdmin>
             <AdminDepositsPage />
-          </RequireAuth>
+          </RequireAdmin>
         }
       />
       <Route
         path="/admin/deposits/:depositId"
         element={
-          <RequireAuth>
+          <RequireAdmin>
             <AdminDepositDetailPage />
-          </RequireAuth>
+          </RequireAdmin>
         }
       />
       <Route
         path="/admin/rewards"
         element={
-          <RequireAuth>
+          <RequireAdmin>
             <AdminRewardsPage />
-          </RequireAuth>
+          </RequireAdmin>
         }
       />
       <Route
         path="/admin/rewards/:poolId"
         element={
-          <RequireAuth>
+          <RequireAdmin>
             <AdminRewardDetailPage />
-          </RequireAuth>
+          </RequireAdmin>
         }
       />
       <Route
         path="/admin/announcements"
         element={
-          <RequireAuth>
+          <RequireAdmin>
             <AdminAnnouncementsPage />
-          </RequireAuth>
+          </RequireAdmin>
         }
       />
       <Route
         path="/admin/support"
         element={
-          <RequireAuth>
+          <RequireAdmin>
             <AdminSupportPage />
-          </RequireAuth>
+          </RequireAdmin>
         }
       />
       <Route
         path="/admin/payment-rules"
         element={
-          <RequireAuth>
+          <RequireAdmin>
             <AdminPaymentSettingsPage />
-          </RequireAuth>
+          </RequireAdmin>
         }
       />
       <Route
         path="/admin/chats"
         element={
-          <RequireAuth>
+          <RequireAdmin>
             <AdminChatsPage />
-          </RequireAuth>
+          </RequireAdmin>
         }
       />
       <Route
         path="/admin/chats/:userId"
         element={
-          <RequireAuth>
+          <RequireAdmin>
             <AdminChatDetailPage />
-          </RequireAuth>
+          </RequireAdmin>
         }
       />
       <Route
         path="/admin/sms"
         element={
-          <RequireAuth>
+          <RequireAdmin>
             <AdminSmsSettingsPage />
-          </RequireAuth>
+          </RequireAdmin>
         }
       />
       <Route
         path="/admin/withdrawal-requirements"
         element={
-          <RequireAuth>
+          <RequireAdmin>
             <AdminWithdrawalRequirementsPage />
-          </RequireAuth>
+          </RequireAdmin>
         }
       />
       <Route
         path="/admin/transactions"
         element={
-          <RequireAuth>
+          <RequireAdmin>
             <AdminTransactionsPage />
-          </RequireAuth>
+          </RequireAdmin>
         }
       />
 
