@@ -17,8 +17,9 @@ import {
   auditLogs,
   chatMessages,
   binancePayAccounts,
+  paymentLinkAccounts,
 } from "../db/schema.js";
-import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, blockDuringMaintenance, type AuthedRequest } from "../middleware/auth.js";
 import {
   validateMomoName,
   validateBankAccountName,
@@ -169,7 +170,7 @@ const withdrawSchema = z.object({
   methodId: z.string().uuid(),
 });
 
-walletRouter.post("/withdraw", requireAuth, async (req: AuthedRequest, res) => {
+walletRouter.post("/withdraw", requireAuth, blockDuringMaintenance, async (req: AuthedRequest, res) => {
   const parsed = withdrawSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.flatten() });
@@ -378,6 +379,7 @@ walletRouter.get("/deposit-methods", requireAuth, async (_req, res) => {
       crypto: row?.cryptoEnabled ?? true,
       chat: row?.chatEnabled ?? true,
       binancePay: row?.binancePayEnabled ?? true,
+      paymentLink: row?.paymentLinkEnabled ?? true,
     });
   } catch (error) {
     console.error("Error fetching deposit methods:", error);
@@ -401,6 +403,26 @@ walletRouter.get("/binance-pay-accounts", requireAuth, async (_req, res) => {
   } catch (error) {
     console.error("Error fetching Binance Pay accounts:", error);
     res.status(500).json({ error: "Failed to load Binance Pay accounts" });
+  }
+});
+
+// Active admin-managed static payment links for the investor to choose from.
+walletRouter.get("/payment-link-accounts", requireAuth, async (_req, res) => {
+  try {
+    const accounts = await db
+      .select({
+        id: paymentLinkAccounts.id,
+        label: paymentLinkAccounts.label,
+        url: paymentLinkAccounts.url,
+        instructions: paymentLinkAccounts.instructions,
+      })
+      .from(paymentLinkAccounts)
+      .where(eq(paymentLinkAccounts.isActive, true))
+      .orderBy(desc(paymentLinkAccounts.createdAt));
+    res.json({ accounts });
+  } catch (error) {
+    console.error("Error fetching payment link accounts:", error);
+    res.status(500).json({ error: "Failed to load payment link accounts" });
   }
 });
 
@@ -480,24 +502,47 @@ const binanceManualDepositSchema = z.object({
   screenshotUrl: z.string().url(),
 });
 
+const paymentLinkManualDepositSchema = z.object({
+  method: z.literal("payment_link"),
+  reference: z.string().min(3).max(20),
+  amountGhs: z.coerce.number().positive(),
+  paymentLinkAccountId: z.string().uuid(),
+  gatewayReference: z.string().trim().max(100).optional(),
+  senderName: z.string().min(2).max(255),
+  screenshotUrl: z.string().url(),
+});
+
 walletRouter.post(
   "/manual-deposits",
   requireAuth,
+  blockDuringMaintenance,
   async (req: AuthedRequest, res) => {
-    const isBinance = req.body?.method === "binance_pay";
-    const parsed = isBinance
-      ? binanceManualDepositSchema.safeParse(req.body)
-      : momoManualDepositSchema.safeParse(req.body);
+    const method: "momo" | "binance_pay" | "payment_link" =
+      req.body?.method === "binance_pay" || req.body?.method === "payment_link"
+        ? req.body.method
+        : "momo";
+    const parsed =
+      method === "binance_pay"
+        ? binanceManualDepositSchema.safeParse(req.body)
+        : method === "payment_link"
+          ? paymentLinkManualDepositSchema.safeParse(req.body)
+          : momoManualDepositSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: parsed.error.flatten() });
     }
     const { reference, amountGhs, senderName, screenshotUrl } = parsed.data;
 
     const [methodRow] = await db.select().from(depositMethodSettings).limit(1);
-    if (isBinance) {
+    if (method === "binance_pay") {
       if (methodRow && !methodRow.binancePayEnabled) {
         return res.status(400).json({
           error: "Binance Pay deposits are currently unavailable.",
+        });
+      }
+    } else if (method === "payment_link") {
+      if (methodRow && !methodRow.paymentLinkEnabled) {
+        return res.status(400).json({
+          error: "Payment link deposits are currently unavailable.",
         });
       }
     } else if (methodRow && !methodRow.momoEnabled) {
@@ -507,20 +552,22 @@ walletRouter.post(
     }
 
     const rules = await getPaymentRules();
-    const minDeposit = isBinance ? rules.binanceMinDepositGhs : rules.momoMinDepositGhs;
-    const maxDeposit = isBinance ? rules.binanceMaxDepositGhs : rules.momoMaxDepositGhs;
-    if (minDeposit !== null && amountGhs < minDeposit) {
-      return res.status(400).json({
-        error: `Minimum deposit is GHS ${minDeposit.toFixed(2)}`,
-      });
-    }
-    if (maxDeposit !== null && amountGhs > maxDeposit) {
-      return res.status(400).json({
-        error: `Maximum deposit is GHS ${maxDeposit.toFixed(2)}`,
-      });
+    const minDeposit = method === "binance_pay" ? rules.binanceMinDepositGhs : rules.momoMinDepositGhs;
+    const maxDeposit = method === "binance_pay" ? rules.binanceMaxDepositGhs : rules.momoMaxDepositGhs;
+    if (method !== "payment_link") {
+      if (minDeposit !== null && amountGhs < minDeposit) {
+        return res.status(400).json({
+          error: `Minimum deposit is GHS ${minDeposit.toFixed(2)}`,
+        });
+      }
+      if (maxDeposit !== null && amountGhs > maxDeposit) {
+        return res.status(400).json({
+          error: `Maximum deposit is GHS ${maxDeposit.toFixed(2)}`,
+        });
+      }
     }
 
-    if (isBinance) {
+    if (method === "binance_pay") {
       const binanceData = parsed.data as z.infer<typeof binanceManualDepositSchema>;
       const [account] = await db
         .select()
@@ -535,33 +582,63 @@ walletRouter.post(
       if (!account) {
         return res.status(400).json({ error: "That Binance Pay account is no longer available." });
       }
+    } else if (method === "payment_link") {
+      const linkData = parsed.data as z.infer<typeof paymentLinkManualDepositSchema>;
+      const [account] = await db
+        .select()
+        .from(paymentLinkAccounts)
+        .where(
+          and(
+            eq(paymentLinkAccounts.id, linkData.paymentLinkAccountId),
+            eq(paymentLinkAccounts.isActive, true),
+          ),
+        )
+        .limit(1);
+      if (!account) {
+        return res.status(400).json({ error: "That payment link is no longer available." });
+      }
     }
 
     try {
-      const values = isBinance
-        ? {
-            userId: req.user!.userId,
-            method: "binance_pay" as const,
-            reference,
-            amountGhs: amountGhs.toFixed(2),
-            senderName,
-            binanceAccountId: (parsed.data as z.infer<typeof binanceManualDepositSchema>)
-              .binanceAccountId,
-            senderBinanceId: (parsed.data as z.infer<typeof binanceManualDepositSchema>)
-              .senderBinanceId,
-            senderEmail: (parsed.data as z.infer<typeof binanceManualDepositSchema>).senderEmail,
-            screenshotUrl,
-          }
-        : {
-            userId: req.user!.userId,
-            method: "momo" as const,
-            reference,
-            amountGhs: amountGhs.toFixed(2),
-            network: (parsed.data as z.infer<typeof momoManualDepositSchema>).network,
-            senderName,
-            senderNumber: (parsed.data as z.infer<typeof momoManualDepositSchema>).senderNumber,
-            screenshotUrl,
-          };
+      const values =
+        method === "binance_pay"
+          ? {
+              userId: req.user!.userId,
+              method: "binance_pay" as const,
+              reference,
+              amountGhs: amountGhs.toFixed(2),
+              senderName,
+              binanceAccountId: (parsed.data as z.infer<typeof binanceManualDepositSchema>)
+                .binanceAccountId,
+              senderBinanceId: (parsed.data as z.infer<typeof binanceManualDepositSchema>)
+                .senderBinanceId,
+              senderEmail: (parsed.data as z.infer<typeof binanceManualDepositSchema>).senderEmail,
+              screenshotUrl,
+            }
+          : method === "payment_link"
+            ? {
+                userId: req.user!.userId,
+                method: "payment_link" as const,
+                reference,
+                amountGhs: amountGhs.toFixed(2),
+                senderName,
+                paymentLinkAccountId: (parsed.data as z.infer<typeof paymentLinkManualDepositSchema>)
+                  .paymentLinkAccountId,
+                gatewayReference:
+                  (parsed.data as z.infer<typeof paymentLinkManualDepositSchema>).gatewayReference ??
+                  null,
+                screenshotUrl,
+              }
+            : {
+                userId: req.user!.userId,
+                method: "momo" as const,
+                reference,
+                amountGhs: amountGhs.toFixed(2),
+                network: (parsed.data as z.infer<typeof momoManualDepositSchema>).network,
+                senderName,
+                senderNumber: (parsed.data as z.infer<typeof momoManualDepositSchema>).senderNumber,
+                screenshotUrl,
+              };
 
       const [deposit] = await db.insert(manualDeposits).values(values).returning();
 

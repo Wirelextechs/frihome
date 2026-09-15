@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Loader2, Paperclip, Send, Wallet, X } from "lucide-react";
+import { Loader2, LockKeyhole, Paperclip, Send, Wallet, X } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
 import { Skeleton } from "../components/ui/skeleton";
@@ -145,6 +145,8 @@ export function ChatPage() {
   const [uploading, setUploading] = useState(false);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [typingAdminName, setTypingAdminName] = useState<string | null>(null);
+  const [closed, setClosed] = useState(false);
+  const [closedMessage, setClosedMessage] = useState<string | null>(null);
 
   // Tracks which message ids we've already rendered, purely to detect newly
   // arrived messages (for scroll/mark-read) -- the message list itself is
@@ -179,6 +181,8 @@ export function ChatPage() {
       try {
         const { data } = await api.get("/api/chat/messages");
         if (cancelled) return;
+        setClosed(!!data.closed);
+        setClosedMessage(data.closedMessage ?? null);
         const newOnes = absorb(data.messages, data.deposits);
         if (newOnes.length > 0) {
           // Something arrived from the other side: mark thread read
@@ -389,6 +393,15 @@ export function ChatPage() {
       {/* Composer, fixed above the bottom nav */}
       <div className="fixed inset-x-0 bottom-[4.75rem] z-20 px-4">
         <div className="mx-auto w-full max-w-sm">
+          {closed ? (
+            <div className="flex items-center gap-2.5 rounded-2xl border border-border/70 bg-card/95 px-4 py-3 text-center shadow-soft-lg backdrop-blur-md">
+              <LockKeyhole size={16} className="shrink-0 text-ink-400" />
+              <p className="text-xs text-ink-500">
+                {closedMessage ?? "Chat is currently unavailable."}
+              </p>
+            </div>
+          ) : (
+            <>
           {attachedImageUrl && (
             <div className="mb-2 flex items-center gap-2 rounded-xl border border-border bg-card p-2 shadow-soft">
               <img
@@ -454,6 +467,8 @@ export function ChatPage() {
               )}
             </button>
           </form>
+            </>
+          )}
         </div>
       </div>
 

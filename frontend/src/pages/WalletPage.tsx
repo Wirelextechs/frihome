@@ -7,6 +7,7 @@ import {
   Copy,
   Coins,
   CreditCard,
+  ExternalLink,
   Gift,
   MessageCircle,
   RefreshCcw,
@@ -48,6 +49,13 @@ interface BinancePayAccount {
   label: string;
 }
 
+interface PaymentLinkAccount {
+  id: string;
+  label: string;
+  url: string;
+  instructions: string | null;
+}
+
 interface Wallet {
   balanceGhs: string;
 }
@@ -81,7 +89,7 @@ interface WithdrawalMethod {
 }
 
 const DEPOSIT_METHOD_META: {
-  value: "momo" | "crypto" | "binancePay" | "chat";
+  value: "momo" | "crypto" | "binancePay" | "chat" | "paymentLink";
   label: string;
   icon: typeof Smartphone;
 }[] = [
@@ -89,6 +97,7 @@ const DEPOSIT_METHOD_META: {
   { value: "momo", label: "Mobile Money", icon: Smartphone },
   { value: "crypto", label: "USDT (Crypto)", icon: Coins },
   { value: "binancePay", label: "Binance Pay", icon: CreditCard },
+  { value: "paymentLink", label: "Payment Link", icon: ExternalLink },
 ];
 
 const METHOD_TYPES: {
@@ -247,7 +256,7 @@ export function WalletPage() {
 
   const [depositAmount, setDepositAmount] = useState("");
   const [depositMethod, setDepositMethod] = useState<
-    "momo" | "bank" | "crypto" | "chat" | "binancePay"
+    "momo" | "bank" | "crypto" | "chat" | "binancePay" | "paymentLink"
   >("chat");
   // Contact number sent along with a live-chat top-up request
   const [depositPhone, setDepositPhone] = useState(user?.phone ?? "");
@@ -259,7 +268,8 @@ export function WalletPage() {
     crypto: boolean;
     chat: boolean;
     binancePay: boolean;
-  }>({ momo: true, crypto: true, chat: true, binancePay: true });
+    paymentLink: boolean;
+  }>({ momo: true, crypto: true, chat: true, binancePay: true, paymentLink: true });
 
   useEffect(() => {
     api
@@ -270,6 +280,7 @@ export function WalletPage() {
           crypto: data.crypto ?? true,
           chat: data.chat ?? true,
           binancePay: data.binancePay ?? true,
+          paymentLink: data.paymentLink ?? true,
         });
       })
       .catch(() => {});
@@ -277,15 +288,18 @@ export function WalletPage() {
 
   // Keep the selected method valid when the admin has hidden it.
   useEffect(() => {
-    const order: ("momo" | "crypto" | "chat" | "binancePay")[] = [
+    const order: ("momo" | "crypto" | "chat" | "binancePay" | "paymentLink")[] = [
       "chat",
       "momo",
       "crypto",
       "binancePay",
+      "paymentLink",
     ];
     if (
       depositMethod !== "bank" &&
-      !enabledDepositMethods[depositMethod as "momo" | "crypto" | "chat" | "binancePay"]
+      !enabledDepositMethods[
+        depositMethod as "momo" | "crypto" | "chat" | "binancePay" | "paymentLink"
+      ]
     ) {
       const first = order.find((m) => enabledDepositMethods[m]);
       if (first) setDepositMethod(first);
@@ -336,10 +350,12 @@ export function WalletPage() {
   // being submitted.
   function validateDepositAmount(
     amount: number,
-    method: "momo" | "bank" | "crypto" | "chat" | "binancePay",
+    method: "momo" | "bank" | "crypto" | "chat" | "binancePay" | "paymentLink",
   ): string | null {
     if (!(amount > 0)) return "Enter a valid amount";
     if (!paymentRules) return null;
+
+    if (method === "paymentLink") return null;
 
     if (method === "crypto") {
       const min = paymentRules.cryptoMinDepositGhs ?? cryptoQuote?.minDepositGhs ?? null;
@@ -430,6 +446,19 @@ export function WalletPage() {
   });
   const [binanceSubmitting, setBinanceSubmitting] = useState(false);
 
+  const [paymentLinkSheet, setPaymentLinkSheet] = useState<{
+    accounts: PaymentLinkAccount[];
+    reference: string;
+    amountGhs: string;
+  } | null>(null);
+  const [paymentLinkForm, setPaymentLinkForm] = useState({
+    accountId: "",
+    gatewayReference: "",
+    senderName: "",
+    screenshotUrl: "" as string | null,
+  });
+  const [paymentLinkSubmitting, setPaymentLinkSubmitting] = useState(false);
+
   const methodsForType = methods.filter((m) => m.type === withdrawType);
 
   function loadWallet() {
@@ -505,6 +534,26 @@ export function WalletPage() {
           screenshotUrl: null,
         });
         setBinanceSheet({
+          accounts: accountsRes.data.accounts,
+          reference: referenceRes.data.reference,
+          amountGhs: depositAmount,
+        });
+      } else if (depositMethod === "paymentLink") {
+        const [accountsRes, referenceRes] = await Promise.all([
+          api.get("/api/wallet/payment-link-accounts"),
+          api.get("/api/wallet/manual-deposits/reference"),
+        ]);
+        if (!accountsRes.data.accounts?.length) {
+          toast.error("No payment links are available right now. Please try another method.");
+          return;
+        }
+        setPaymentLinkForm({
+          accountId: accountsRes.data.accounts[0].id,
+          gatewayReference: "",
+          senderName: "",
+          screenshotUrl: null,
+        });
+        setPaymentLinkSheet({
           accounts: accountsRes.data.accounts,
           reference: referenceRes.data.reference,
           amountGhs: depositAmount,
@@ -588,6 +637,35 @@ export function WalletPage() {
       toast.error(err.response?.data?.error ?? "Failed to submit deposit");
     } finally {
       setBinanceSubmitting(false);
+    }
+  }
+
+  async function handlePaymentLinkSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!paymentLinkSheet) return;
+    if (!paymentLinkForm.screenshotUrl) {
+      toast.error("Please upload your payment screenshot");
+      return;
+    }
+    setPaymentLinkSubmitting(true);
+    try {
+      await api.post("/api/wallet/manual-deposits", {
+        method: "payment_link",
+        reference: paymentLinkSheet.reference,
+        amountGhs: paymentLinkSheet.amountGhs,
+        paymentLinkAccountId: paymentLinkForm.accountId,
+        gatewayReference: paymentLinkForm.gatewayReference || undefined,
+        senderName: paymentLinkForm.senderName,
+        screenshotUrl: paymentLinkForm.screenshotUrl,
+      });
+      toast.success("Submitted, track it in live chat");
+      setPaymentLinkSheet(null);
+      setDepositAmount("");
+      navigate("/chat");
+    } catch (err: any) {
+      toast.error(err.response?.data?.error ?? "Failed to submit deposit");
+    } finally {
+      setPaymentLinkSubmitting(false);
     }
   }
 
@@ -1494,6 +1572,125 @@ export function WalletPage() {
                     className="w-full"
                   >
                     {binanceSubmitting ? "Submitting…" : "I've made the payment"}
+                  </Button>
+                </form>
+              </SheetContent>
+            );
+          })()}
+      </Sheet>
+
+      <Sheet
+        open={!!paymentLinkSheet}
+        onOpenChange={(open) => !open && setPaymentLinkSheet(null)}
+      >
+        {paymentLinkSheet &&
+          (() => {
+            const chosenLink = paymentLinkSheet.accounts.find(
+              (a) => a.id === paymentLinkForm.accountId,
+            );
+            return (
+              <SheetContent title="Complete your payment link deposit">
+                <form onSubmit={handlePaymentLinkSubmit} className="space-y-4">
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                    Open the link below and pay{" "}
+                    <strong>
+                      {formatCurrency(convertFromGhs(Number(paymentLinkSheet.amountGhs), currency), currency)}
+                    </strong>
+                    , quoting <strong>{paymentLinkSheet.reference}</strong> if the
+                    gateway allows a reference. Then fill in your details and
+                    upload your screenshot. Your wallet is credited after a quick
+                    manual review.
+                  </div>
+
+                  <div>
+                    <Label>Payment link</Label>
+                    <Select
+                      value={paymentLinkForm.accountId}
+                      onValueChange={(v) =>
+                        setPaymentLinkForm((f) => ({ ...f, accountId: v }))
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {paymentLinkSheet.accounts.map((a) => (
+                          <SelectItem key={a.id} value={a.id}>
+                            {a.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {chosenLink && (
+                    <Card className="p-4">
+                      {chosenLink.instructions && (
+                        <p className="mb-3 whitespace-pre-wrap text-xs text-ink-500">
+                          {chosenLink.instructions}
+                        </p>
+                      )}
+                      <a
+                        href={chosenLink.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center justify-center gap-1.5 rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground transition active:scale-95"
+                      >
+                        <ExternalLink size={15} />
+                        Open payment link
+                      </a>
+                    </Card>
+                  )}
+
+                  <div>
+                    <Label htmlFor="paymentLinkSenderName">Your name</Label>
+                    <Input
+                      id="paymentLinkSenderName"
+                      required
+                      value={paymentLinkForm.senderName}
+                      onChange={(e) =>
+                        setPaymentLinkForm((f) => ({ ...f, senderName: e.target.value }))
+                      }
+                      placeholder="Name on the payment"
+                    />
+                  </div>
+
+                  <div>
+                    <Label htmlFor="paymentLinkGatewayRef">
+                      Gateway transaction ID (optional)
+                    </Label>
+                    <Input
+                      id="paymentLinkGatewayRef"
+                      value={paymentLinkForm.gatewayReference}
+                      onChange={(e) =>
+                        setPaymentLinkForm((f) => ({
+                          ...f,
+                          gatewayReference: e.target.value,
+                        }))
+                      }
+                      placeholder="If the gateway shows one"
+                    />
+                  </div>
+
+                  <div>
+                    <Label>Payment screenshot</Label>
+                    <ImageUpload
+                      value={paymentLinkForm.screenshotUrl}
+                      onChange={(url) =>
+                        setPaymentLinkForm((f) => ({ ...f, screenshotUrl: url }))
+                      }
+                      endpoint="/api/wallet/manual-deposits/screenshot"
+                      fieldName="screenshot"
+                    />
+                  </div>
+
+                  <Button
+                    type="submit"
+                    size="lg"
+                    disabled={paymentLinkSubmitting}
+                    className="w-full"
+                  >
+                    {paymentLinkSubmitting ? "Submitting…" : "I've made the payment"}
                   </Button>
                 </form>
               </SheetContent>

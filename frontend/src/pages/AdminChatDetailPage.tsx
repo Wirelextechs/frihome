@@ -7,6 +7,8 @@ import {
   ExternalLink,
   Loader2,
   Lock,
+  LockKeyhole,
+  LockKeyholeOpen,
   Paperclip,
   Pencil,
   Send,
@@ -69,6 +71,16 @@ export function AdminChatDetailPage() {
   const [otherTyping, setOtherTyping] = useState<string | null>(null);
   const iHoldLock = lock ? lock.adminId === currentAdminId : false;
   const lockedByOther = lock !== null && !iHoldLock;
+
+  // Chat closure: closed/closedMessage reflect either the global toggle or
+  // this thread's own closure (either is enough); individuallyClosed tells
+  // us whether the toggle below should offer "reopen" for THIS thread
+  // specifically (a globally-closed thread with no individual row still
+  // shows closed, but there's nothing here to "reopen").
+  const [closed, setClosed] = useState(false);
+  const [closedMessage, setClosedMessage] = useState<string | null>(null);
+  const [individuallyClosed, setIndividuallyClosed] = useState(false);
+  const [closingChat, setClosingChat] = useState(false);
   const composerDisabled = lockedByOther || otherTyping !== null;
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
@@ -121,6 +133,9 @@ export function AdminChatDetailPage() {
       const { data } = await api.get(`/api/admin/chats/${userId}/messages`);
       const newOnes = absorb(data.messages, data.deposits);
       setLock(data.lock ?? null);
+      setClosed(!!data.closed);
+      setClosedMessage(data.closedMessage ?? null);
+      setIndividuallyClosed(!!data.individuallyClosed);
       if (newOnes.length > 0) scrollToBottom();
     } catch {
       // next poll will catch up
@@ -146,6 +161,9 @@ export function AdminChatDetailPage() {
         if (cancelled) return;
         if (data.user) setChatUser(data.user);
         setLock(data.lock ?? null);
+        setClosed(!!data.closed);
+        setClosedMessage(data.closedMessage ?? null);
+        setIndividuallyClosed(!!data.individuallyClosed);
         const newOnes = absorb(data.messages, data.deposits);
         if (newOnes.length > 0) {
           const newUserMessages = newOnes.some((m) => m.senderRole === "user");
@@ -294,6 +312,32 @@ export function AdminChatDetailPage() {
       toast.error(err.response?.data?.error ?? "Failed to take over chat");
     } finally {
       setTakingOver(false);
+    }
+  }
+
+  async function handleCloseChat() {
+    setClosingChat(true);
+    try {
+      await api.post(`/api/admin/chats/${userId}/close`, {});
+      await refetchAll();
+      toast.success("Chat closed");
+    } catch (err: any) {
+      toast.error(err.response?.data?.error ?? "Failed to close chat");
+    } finally {
+      setClosingChat(false);
+    }
+  }
+
+  async function handleReopenChat() {
+    setClosingChat(true);
+    try {
+      await api.delete(`/api/admin/chats/${userId}/close`);
+      await refetchAll();
+      toast.success("Chat reopened");
+    } catch (err: any) {
+      toast.error(err.response?.data?.error ?? "Failed to reopen chat");
+    } finally {
+      setClosingChat(false);
     }
   }
 
@@ -532,6 +576,18 @@ export function AdminChatDetailPage() {
               <p className="truncate text-xs text-ink-400">{chatUser?.phone ?? ""}</p>
             </div>
             <button
+              onClick={individuallyClosed ? handleReopenChat : handleCloseChat}
+              disabled={closingChat}
+              title={individuallyClosed ? "Reopen this chat" : "Close this chat"}
+              className={`grid h-9 w-9 shrink-0 place-items-center rounded-full transition active:scale-95 disabled:opacity-50 ${
+                individuallyClosed
+                  ? "bg-red-100 text-red-700 hover:bg-red-200"
+                  : "text-ink-500 hover:bg-ink-100 hover:text-ink-900"
+              }`}
+            >
+              {individuallyClosed ? <LockKeyholeOpen size={16} /> : <LockKeyhole size={16} />}
+            </button>
+            <button
               onClick={openCreditDialog}
               className="flex items-center gap-1.5 rounded-full bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground transition active:scale-95"
             >
@@ -539,6 +595,17 @@ export function AdminChatDetailPage() {
               Credit wallet
             </button>
           </div>
+
+          {closed && (
+            <div className="flex items-center gap-2 border-t border-border bg-red-50 px-4 py-2">
+              <LockKeyhole size={13} className="shrink-0 text-red-600" />
+              <p className="flex-1 text-xs text-red-700">
+                {individuallyClosed
+                  ? "This chat is closed — the investor can read but not send messages."
+                  : `Closed site-wide — ${closedMessage ?? "investors can read but not send messages."}`}
+              </p>
+            </div>
+          )}
 
           {/* Thread claim banner */}
           <div className="flex items-center gap-2 border-t border-border px-4 py-2">

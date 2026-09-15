@@ -11,7 +11,7 @@ import {
   payouts,
   users,
 } from "../db/schema.js";
-import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, blockDuringMaintenance, type AuthedRequest } from "../middleware/auth.js";
 import { creditReferralRewards } from "../lib/referrals.js";
 import { sendSms } from "../lib/moolreSms.js";
 import { getSmsRules } from "../lib/smsSettings.js";
@@ -22,7 +22,7 @@ const createInvestmentSchema = z.object({
   projectId: z.string().uuid(),
 });
 
-investmentsRouter.post("/", requireAuth, async (req: AuthedRequest, res) => {
+investmentsRouter.post("/", requireAuth, blockDuringMaintenance, async (req: AuthedRequest, res) => {
   const parsed = createInvestmentSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.flatten() });

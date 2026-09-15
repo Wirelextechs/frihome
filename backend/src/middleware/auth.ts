@@ -2,7 +2,8 @@ import type { Request, Response, NextFunction } from "express";
 import { and, eq, inArray, isNull, lt, or } from "drizzle-orm";
 import { verifyToken, type JwtPayload } from "../lib/auth.js";
 import { db } from "../db/index.js";
-import { adminPermissions, users } from "../db/schema.js";
+import { adminPermissions, platformSettings, users } from "../db/schema.js";
+import { DEFAULT_MAINTENANCE_MESSAGE } from "../lib/maintenance.js";
 
 export interface AuthedRequest extends Request {
   user?: JwtPayload;
@@ -66,6 +67,39 @@ export async function requireAuth(
   } catch (error) {
     console.error("Auth account lookup failed:", error);
     return res.status(500).json({ error: "Authentication failed" });
+  }
+}
+
+// Server-side gate on investor money/action endpoints during maintenance
+// mode — mirrors the same principle as chat closure: the UI hiding the page
+// is a courtesy, this is what actually stops the action. Admins always pass
+// through untouched (maintenance mode never affects them). Apply this after
+// requireAuth on specific state-changing routes (deposit submit, withdraw,
+// invest, chat send) — never blanket-applied to the whole app, since that
+// would also catch login/webhooks/cron which must keep working.
+export async function blockDuringMaintenance(
+  req: AuthedRequest,
+  res: Response,
+  next: NextFunction,
+) {
+  if (req.user?.role === "admin") return next();
+  try {
+    const [row] = await db
+      .select({
+        maintenanceMode: platformSettings.maintenanceMode,
+        maintenanceMessage: platformSettings.maintenanceMessage,
+      })
+      .from(platformSettings)
+      .limit(1);
+    if (row?.maintenanceMode) {
+      return res
+        .status(503)
+        .json({ error: row.maintenanceMessage || DEFAULT_MAINTENANCE_MESSAGE });
+    }
+    next();
+  } catch (error) {
+    console.error("Maintenance mode check failed:", error);
+    next();
   }
 }
 

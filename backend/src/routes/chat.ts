@@ -5,10 +5,11 @@ import { asc, desc, eq, and, count } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../db/index.js";
 import { chatMessages, manualDeposits, users, chatThreadLocks } from "../db/schema.js";
-import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, blockDuringMaintenance, type AuthedRequest } from "../middleware/auth.js";
 import { uploadPaymentScreenshot } from "../lib/storage.js";
 import { publishChatEvent } from "../lib/realtime.js";
 import { notifyAdminOfChatMessage } from "../lib/chatNotify.js";
+import { getChatClosureStatus } from "../lib/chatClosure.js";
 
 export const chatRouter = Router();
 
@@ -49,7 +50,7 @@ chatRouter.get("/messages", requireAuth, async (req: AuthedRequest, res) => {
 
   try {
     const senderAlias = alias(users, "chat_sender");
-    const [messages, deposits, [lock]] = await Promise.all([
+    const [messages, deposits, [lock], closure] = await Promise.all([
       db
         .select({
           id: chatMessages.id,
@@ -77,9 +78,16 @@ chatRouter.get("/messages", requireAuth, async (req: AuthedRequest, res) => {
         .from(chatThreadLocks)
         .where(eq(chatThreadLocks.threadUserId, userId))
         .limit(1),
+      getChatClosureStatus(userId),
     ]);
 
-    res.json({ messages, deposits, lock: lock ?? null });
+    res.json({
+      messages,
+      deposits,
+      lock: lock ?? null,
+      closed: closure.closed,
+      closedMessage: closure.closedMessage,
+    });
   } catch (error) {
     console.error("Error fetching chat messages:", error);
     res.status(500).json({ error: "Failed to load messages" });
@@ -95,10 +103,15 @@ const sendMessageSchema = z
     message: "Message must have text or an image",
   });
 
-chatRouter.post("/messages", requireAuth, async (req: AuthedRequest, res) => {
+chatRouter.post("/messages", requireAuth, blockDuringMaintenance, async (req: AuthedRequest, res) => {
   const parsed = sendMessageSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.flatten() });
+  }
+
+  const closure = await getChatClosureStatus(req.user!.userId);
+  if (closure.closed) {
+    return res.status(403).json({ error: closure.closedMessage });
   }
 
   try {
@@ -145,6 +158,10 @@ chatRouter.post(
   async (req: AuthedRequest, res) => {
     if (!req.file) {
       return res.status(400).json({ error: "No image file provided" });
+    }
+    const closure = await getChatClosureStatus(req.user!.userId);
+    if (closure.closed) {
+      return res.status(403).json({ error: closure.closedMessage });
     }
     try {
       const url = await uploadPaymentScreenshot(

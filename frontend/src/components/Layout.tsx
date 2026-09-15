@@ -16,6 +16,7 @@ import { api } from "../lib/api";
 import { AnnouncementOverlay } from "./AnnouncementOverlay";
 import { LaunchDaysBanner } from "./LaunchDaysBanner";
 import { NotificationBell } from "./NotificationBell";
+import { MaintenanceScreen } from "./MaintenanceScreen";
 
 // Side tabs flank the raised center Invest button in the dock.
 const LEFT_TABS = [
@@ -84,9 +85,39 @@ export function Layout() {
     };
   }, [user, pathname]);
 
+  // Maintenance mode blocks investors only — admins log in and see the app
+  // as normal. Polled while active so the screen clears on its own once an
+  // admin turns it off, no manual refresh needed.
+  const [maintenanceMode, setMaintenanceMode] = useState(false);
+  const [maintenanceMessage, setMaintenanceMessage] = useState("");
+  useEffect(() => {
+    if (!user || user.role === "admin") return;
+    let cancelled = false;
+    async function fetchMaintenance() {
+      try {
+        const { data } = await api.get("/api/platform");
+        if (cancelled) return;
+        setMaintenanceMode(Boolean(data.maintenanceMode));
+        setMaintenanceMessage(data.maintenanceMessage ?? "");
+      } catch {
+        // leave last known state
+      }
+    }
+    fetchMaintenance();
+    const interval = setInterval(fetchMaintenance, 20000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [user]);
+
   function handleLogout() {
     logout();
     navigate("/login");
+  }
+
+  if (user && user.role !== "admin" && maintenanceMode) {
+    return <MaintenanceScreen message={maintenanceMessage} />;
   }
 
   const actionBtn = onHero

@@ -8,7 +8,7 @@ import {
   wallets,
   walletTransactions,
 } from "../db/schema.js";
-import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, blockDuringMaintenance, type AuthedRequest } from "../middleware/auth.js";
 import { getPaymentRules } from "../lib/paymentSettings.js";
 import {
   createCryptoPayment,
@@ -78,7 +78,7 @@ const cryptoPaymentSchema = z.object({
   txHash: z.string().optional(),
 });
 
-paymentsRouter.post("/crypto", requireAuth, async (req: AuthedRequest, res) => {
+paymentsRouter.post("/crypto", requireAuth, blockDuringMaintenance, async (req: AuthedRequest, res) => {
   const parsed = cryptoPaymentSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.flatten() });

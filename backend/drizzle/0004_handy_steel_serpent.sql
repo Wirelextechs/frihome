@@ -1,0 +1,2 @@
+ALTER TABLE "deposit_method_settings" ADD COLUMN "payment_link_enabled" boolean DEFAULT true NOT NULL;--> statement-breakpoint
+ALTER TABLE "payment_settings" DROP COLUMN IF EXISTS "payment_link_enabled";

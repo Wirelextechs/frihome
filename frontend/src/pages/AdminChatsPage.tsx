@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Lock, MessageSquare } from "lucide-react";
+import { ArrowLeft, Lock, LockKeyhole, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
 
@@ -12,6 +12,7 @@ interface Conversation {
   lastMessagePreview: string;
   unreadCount: number;
   lockedByAdminName: string | null;
+  isClosed: boolean;
 }
 
 function relativeTime(iso: string) {
@@ -30,7 +31,30 @@ export function AdminChatsPage() {
   const navigate = useNavigate();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [globallyClosed, setGloballyClosed] = useState(false);
+  const [savingGlobalClose, setSavingGlobalClose] = useState(false);
   const inFlightRef = useRef(false);
+
+  useEffect(() => {
+    api
+      .get("/api/admin/chat-settings")
+      .then(({ data }) => setGloballyClosed(!!data.data?.chatGloballyClosed))
+      .catch(() => {});
+  }, []);
+
+  async function toggleGlobalClose() {
+    const next = !globallyClosed;
+    setSavingGlobalClose(true);
+    try {
+      await api.put("/api/admin/chat-settings", { chatGloballyClosed: next });
+      setGloballyClosed(next);
+      toast.success(next ? "All chats closed" : "Chats reopened");
+    } catch (error: any) {
+      toast.error(error.response?.data?.error ?? "Failed to update chat settings");
+    } finally {
+      setSavingGlobalClose(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -69,7 +93,21 @@ export function AdminChatsPage() {
           Back to Dashboard
         </button>
 
-        <h1 className="text-3xl font-bold mb-6">Live Chats</h1>
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-3xl font-bold">Live Chats</h1>
+          <button
+            onClick={toggleGlobalClose}
+            disabled={savingGlobalClose}
+            className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition disabled:opacity-50 ${
+              globallyClosed
+                ? "bg-red-50 text-red-700 hover:bg-red-100"
+                : "border border-border bg-card hover:bg-ink-50"
+            }`}
+          >
+            <LockKeyhole size={16} />
+            {globallyClosed ? "All chats closed — reopen" : "Close all chats"}
+          </button>
+        </div>
 
         {loading ? (
           <div className="space-y-3">
@@ -107,6 +145,15 @@ export function AdminChatsPage() {
                         >
                           <Lock size={9} />
                           {c.lockedByAdminName}
+                        </span>
+                      )}
+                      {c.isClosed && (
+                        <span
+                          className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700"
+                          title="Chat closed"
+                        >
+                          <LockKeyhole size={9} />
+                          Closed
                         </span>
                       )}
                     </p>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
 import { Pagination } from "../components/ui/pagination";
@@ -35,6 +35,16 @@ interface BinancePayAccount {
   isActive: boolean;
 }
 
+interface PaymentLinkAccount {
+  id: string;
+  label: string;
+  url: string;
+  instructions: string | null;
+  isActive: boolean;
+  updatedAt: string;
+  updatedByPhone: string | null;
+}
+
 const NETWORKS = ["mtn", "vodafone", "telecel", "airteltigo"];
 
 interface DepositMethods {
@@ -42,6 +52,7 @@ interface DepositMethods {
   cryptoEnabled: boolean;
   chatEnabled: boolean;
   binancePayEnabled: boolean;
+  paymentLinkEnabled: boolean;
 }
 
 const METHOD_OPTIONS: { key: keyof DepositMethods; label: string; hint: string }[] = [
@@ -61,11 +72,18 @@ const METHOD_OPTIONS: { key: keyof DepositMethods; label: string; hint: string }
     hint: "Manual Binance Pay deposit into an admin's registered ID, with review",
   },
   {
+    key: "paymentLinkEnabled",
+    label: "Payment Link",
+    hint: "Static, no-API checkout link — investor pays then submits proof for review",
+  },
+  {
     key: "chatEnabled",
     label: "Live Chat",
     hint: "User arranges the top-up with an admin in live chat",
   },
 ];
+
+const emptyPaymentLinkForm = { label: "", url: "", instructions: "" };
 
 export function AdminDepositsPage() {
   const navigate = useNavigate();
@@ -77,6 +95,7 @@ export function AdminDepositsPage() {
     cryptoEnabled: true,
     chatEnabled: true,
     binancePayEnabled: true,
+    paymentLinkEnabled: true,
   });
   const [savingMethods, setSavingMethods] = useState(false);
   const [pending, setPending] = useState<PendingDeposit[]>([]);
@@ -90,14 +109,19 @@ export function AdminDepositsPage() {
   const [savingBinance, setSavingBinance] = useState(false);
   const [removingBinance, setRemovingBinance] = useState(false);
 
+  const [paymentLinks, setPaymentLinks] = useState<PaymentLinkAccount[]>([]);
+  const [paymentLinkForm, setPaymentLinkForm] = useState(emptyPaymentLinkForm);
+  const [savingPaymentLink, setSavingPaymentLink] = useState(false);
+
   const fetchAll = async (p = page) => {
     try {
       setLoading(true);
-      const [settingsRes, methodsRes, pendingRes, binanceRes] = await Promise.all([
+      const [settingsRes, methodsRes, pendingRes, binanceRes, paymentLinksRes] = await Promise.all([
         api.get("/api/admin/deposit-settings"),
         api.get("/api/admin/deposit-methods"),
         api.get(`/api/admin/manual-deposits/pending?page=${p}`),
         api.get("/api/admin/binance-pay-account"),
+        api.get("/api/admin/payment-link-accounts"),
       ]);
       setSettings(settingsRes.data.data);
       if (settingsRes.data.data) {
@@ -118,6 +142,7 @@ export function AdminDepositsPage() {
           label: binanceRes.data.data.label,
         });
       }
+      setPaymentLinks(paymentLinksRes.data.data);
     } catch (error) {
       console.error("Error:", error);
       toast.error("Failed to load deposit data");
@@ -174,6 +199,54 @@ export function AdminDepositsPage() {
       toast.error(error.response?.data?.error ?? "Failed to remove Binance Pay ID");
     } finally {
       setRemovingBinance(false);
+    }
+  }
+
+  async function handleAddPaymentLink() {
+    if (!paymentLinkForm.label.trim() || !paymentLinkForm.url.trim()) {
+      toast.error("Enter both a label and a URL");
+      return;
+    }
+    try {
+      setSavingPaymentLink(true);
+      const { data } = await api.post("/api/admin/payment-link-accounts", {
+        label: paymentLinkForm.label.trim(),
+        url: paymentLinkForm.url.trim(),
+        instructions: paymentLinkForm.instructions.trim() || null,
+      });
+      setPaymentLinks((prev) => [data.data, ...prev]);
+      setPaymentLinkForm(emptyPaymentLinkForm);
+      toast.success("Payment link added");
+    } catch (error: any) {
+      toast.error(error.response?.data?.error ?? "Failed to add payment link");
+    } finally {
+      setSavingPaymentLink(false);
+    }
+  }
+
+  async function handleTogglePaymentLink(link: PaymentLinkAccount) {
+    const next = !link.isActive;
+    setPaymentLinks((prev) =>
+      prev.map((l) => (l.id === link.id ? { ...l, isActive: next } : l)),
+    );
+    try {
+      await api.patch(`/api/admin/payment-link-accounts/${link.id}`, { isActive: next });
+    } catch (error: any) {
+      setPaymentLinks((prev) =>
+        prev.map((l) => (l.id === link.id ? { ...l, isActive: link.isActive } : l)),
+      );
+      toast.error(error.response?.data?.error ?? "Failed to update payment link");
+    }
+  }
+
+  async function handleDeletePaymentLink(link: PaymentLinkAccount) {
+    if (!window.confirm(`Remove "${link.label}"? Investors will no longer see it.`)) return;
+    try {
+      await api.delete(`/api/admin/payment-link-accounts/${link.id}`);
+      setPaymentLinks((prev) => prev.filter((l) => l.id !== link.id));
+      toast.success("Payment link removed");
+    } catch (error: any) {
+      toast.error(error.response?.data?.error ?? "Failed to remove payment link");
     }
   }
 
@@ -355,6 +428,97 @@ export function AdminDepositsPage() {
               </button>
             )}
           </div>
+        </div>
+
+        <div className="rounded-lg border border-border bg-card p-6 mb-6">
+          <h2 className="text-sm font-bold text-ink-700 uppercase mb-4">
+            Payment Links
+          </h2>
+          <p className="text-sm text-ink-500 mb-4">
+            Static checkout links investors pay into directly, then submit proof for
+            review — for gateways with no API to confirm payment automatically.
+          </p>
+
+          {paymentLinks.length > 0 && (
+            <div className="mb-4 space-y-2">
+              {paymentLinks.map((link) => (
+                <div
+                  key={link.id}
+                  className="flex items-center justify-between gap-3 rounded-lg border border-border px-4 py-3"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-ink-900">{link.label}</p>
+                    <p className="truncate text-xs text-ink-400">{link.url}</p>
+                  </div>
+                  <label className="flex shrink-0 cursor-pointer items-center gap-2">
+                    <span className="text-xs text-ink-500">
+                      {link.isActive ? "Active" : "Inactive"}
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={link.isActive}
+                      onChange={() => handleTogglePaymentLink(link)}
+                      className="h-4 w-4 accent-primary"
+                    />
+                  </label>
+                  <button
+                    onClick={() => handleDeletePaymentLink(link)}
+                    className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-ink-400 hover:bg-red-50 hover:text-red-600"
+                    aria-label="Remove payment link"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="text-sm font-medium text-ink-700">Label</label>
+              <input
+                value={paymentLinkForm.label}
+                onChange={(e) =>
+                  setPaymentLinkForm((f) => ({ ...f, label: e.target.value }))
+                }
+                className="mt-1 w-full rounded-lg border border-border px-3 py-2"
+                placeholder="e.g. Card checkout"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-ink-700">URL</label>
+              <input
+                value={paymentLinkForm.url}
+                onChange={(e) =>
+                  setPaymentLinkForm((f) => ({ ...f, url: e.target.value }))
+                }
+                className="mt-1 w-full rounded-lg border border-border px-3 py-2"
+                placeholder="https://..."
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="text-sm font-medium text-ink-700">
+                Instructions (optional)
+              </label>
+              <textarea
+                value={paymentLinkForm.instructions}
+                onChange={(e) =>
+                  setPaymentLinkForm((f) => ({ ...f, instructions: e.target.value }))
+                }
+                rows={2}
+                className="mt-1 w-full rounded-lg border border-border px-3 py-2 text-sm"
+                placeholder="Extra guidance shown to the investor for this link"
+              />
+            </div>
+          </div>
+          <button
+            onClick={handleAddPaymentLink}
+            disabled={savingPaymentLink}
+            className="mt-4 flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+          >
+            <Plus size={15} />
+            {savingPaymentLink ? "Adding..." : "Add payment link"}
+          </button>
         </div>
 
         <div className="rounded-lg border border-border bg-card p-6">

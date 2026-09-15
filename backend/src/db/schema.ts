@@ -85,6 +85,7 @@ export const manualDepositStatusEnum = pgEnum("manual_deposit_status", [
 export const manualDepositMethodEnum = pgEnum("manual_deposit_method", [
   "momo",
   "binance_pay",
+  "payment_link",
 ]);
 
 export const rewardTypeEnum = pgEnum("reward_type", [
@@ -409,6 +410,7 @@ export const depositMethodSettings = pgTable("deposit_method_settings", {
   cryptoEnabled: boolean("crypto_enabled").notNull().default(true),
   chatEnabled: boolean("chat_enabled").notNull().default(true),
   binancePayEnabled: boolean("binance_pay_enabled").notNull().default(true),
+  paymentLinkEnabled: boolean("payment_link_enabled").notNull().default(true),
   updatedBy: uuid("updated_by").references(() => users.id, {
     onDelete: "set null",
   }),
@@ -428,6 +430,23 @@ export const binancePayAccounts = pgTable("binance_pay_accounts", {
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// Static, no-API payment gateway links (e.g. a hosted checkout page) that
+// investors pay into directly and then report back with proof — same manual
+// review pattern as momo/Binance Pay, since there's no webhook to confirm
+// payment automatically.
+export const paymentLinkAccounts = pgTable("payment_link_accounts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  label: varchar("label", { length: 100 }).notNull(),
+  url: text("url").notNull(),
+  instructions: text("instructions"),
+  isActive: boolean("is_active").notNull().default(true),
+  updatedBy: uuid("updated_by").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
 export const manualDeposits = pgTable("manual_deposits", {
@@ -451,6 +470,15 @@ export const manualDeposits = pgTable("manual_deposits", {
   ),
   senderBinanceId: varchar("sender_binance_id", { length: 64 }),
   senderEmail: varchar("sender_email", { length: 255 }),
+  // Payment-link-specific; null for momo/binance_pay deposits.
+  paymentLinkAccountId: uuid("payment_link_account_id").references(
+    () => paymentLinkAccounts.id,
+    { onDelete: "set null" },
+  ),
+  // Optional transaction ID/receipt code from the gateway, for the admin to
+  // cross-check against the gateway's own dashboard (no API to verify
+  // automatically). Not required since not every gateway shows one.
+  gatewayReference: varchar("gateway_reference", { length: 100 }),
   screenshotUrl: text("screenshot_url").notNull(),
   status: manualDepositStatusEnum("status").notNull().default("pending"),
   rejectionReason: text("rejection_reason"),
@@ -595,6 +623,19 @@ export const chatThreadLocks = pgTable("chat_thread_locks", {
   lockedAt: timestamp("locked_at").notNull().defaultNow(),
 });
 
+// Presence of a row means this one investor's chat is closed — they can
+// still read the thread but can't send. Independent of chatThreadLocks
+// (claiming) and of platformSettings.chatGloballyClosed (site-wide); either
+// this row OR the global flag being set is enough to close a given thread.
+export const chatClosures = pgTable("chat_closures", {
+  threadUserId: uuid("thread_user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  message: text("message"),
+  closedBy: uuid("closed_by").references(() => users.id, { onDelete: "set null" }),
+  closedAt: timestamp("closed_at").notNull().defaultNow(),
+});
+
 export const supportSettings = pgTable("support_settings", {
   id: uuid("id").primaryKey().defaultRandom(),
   whatsappChannelUrl: text("whatsapp_channel_url"),
@@ -637,10 +678,17 @@ export const paymentSettings = pgTable("payment_settings", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
-// Site-wide launch date, shown as a "days in operation" banner to investors.
+// Site-wide launch date; admin-configurable so the "days in operation"
+// banner can be corrected/adjusted at any time. Also carries the two other
+// global admin-facing toggles that apply site-wide: closing every live chat
+// at once, and maintenance mode (investors only — admins are unaffected).
 export const platformSettings = pgTable("platform_settings", {
   id: uuid("id").primaryKey().defaultRandom(),
   launchDate: timestamp("launch_date").notNull().defaultNow(),
+  chatGloballyClosed: boolean("chat_globally_closed").notNull().default(false),
+  chatGloballyClosedMessage: text("chat_globally_closed_message"),
+  maintenanceMode: boolean("maintenance_mode").notNull().default(false),
+  maintenanceMessage: text("maintenance_message"),
   updatedBy: uuid("updated_by").references(() => users.id, {
     onDelete: "set null",
   }),

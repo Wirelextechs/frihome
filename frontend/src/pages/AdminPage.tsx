@@ -24,6 +24,7 @@ import {
   Wallet,
   Menu,
   X,
+  Wrench,
 } from "lucide-react";
 import { NotificationBell } from "../components/NotificationBell";
 import { InvestedByPackageModal, type InvestedByPackageRow } from "../components/InvestedByPackageModal";
@@ -61,11 +62,18 @@ export function AdminPage() {
 
   const [launchDate, setLaunchDate] = useState("");
   const [savingLaunchDate, setSavingLaunchDate] = useState(false);
+  const [maintenanceMode, setMaintenanceMode] = useState(false);
+  const [maintenanceMessage, setMaintenanceMessage] = useState("");
+  const [savingMaintenance, setSavingMaintenance] = useState(false);
   useEffect(() => {
     if (user?.role !== "admin") return;
     api
       .get("/api/admin/platform-settings")
-      .then(({ data }) => setLaunchDate(toDateInputValue(data.data.launchDate)))
+      .then(({ data }) => {
+        setLaunchDate(toDateInputValue(data.data.launchDate));
+        setMaintenanceMode(Boolean(data.data.maintenanceMode));
+        setMaintenanceMessage(data.data.maintenanceMessage ?? "");
+      })
       .catch(() => {});
   }, [user]);
 
@@ -80,6 +88,43 @@ export function AdminPage() {
       toast.error(error.response?.data?.error ?? "Failed to update launch date");
     } finally {
       setSavingLaunchDate(false);
+    }
+  }
+
+  async function handleToggleMaintenance(next: boolean) {
+    if (!launchDate) return;
+    setSavingMaintenance(true);
+    try {
+      const { data } = await api.put("/api/admin/platform-settings", {
+        launchDate,
+        maintenanceMode: next,
+        maintenanceMessage,
+      });
+      setMaintenanceMode(Boolean(data.data.maintenanceMode));
+      setMaintenanceMessage(data.data.maintenanceMessage ?? "");
+      toast.success(next ? "Maintenance mode enabled" : "Maintenance mode disabled");
+    } catch (error: any) {
+      toast.error(error.response?.data?.error ?? "Failed to update maintenance mode");
+    } finally {
+      setSavingMaintenance(false);
+    }
+  }
+
+  async function handleSaveMaintenanceMessage() {
+    if (!launchDate) return;
+    setSavingMaintenance(true);
+    try {
+      const { data } = await api.put("/api/admin/platform-settings", {
+        launchDate,
+        maintenanceMode,
+        maintenanceMessage,
+      });
+      setMaintenanceMessage(data.data.maintenanceMessage ?? "");
+      toast.success("Maintenance message updated");
+    } catch (error: any) {
+      toast.error(error.response?.data?.error ?? "Failed to update maintenance message");
+    } finally {
+      setSavingMaintenance(false);
     }
   }
 
@@ -403,6 +448,51 @@ export function AdminPage() {
                   className="rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-50"
                 >
                   {savingLaunchDate ? "Saving…" : "Save"}
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-6 p-6 rounded-lg border border-border bg-card">
+              <div className="flex items-start justify-between gap-4 mb-1">
+                <div className="flex items-center gap-2">
+                  <Wrench size={18} className="text-ink-500" />
+                  <h3 className="text-lg font-bold">Maintenance Mode</h3>
+                </div>
+                <button
+                  onClick={() => handleToggleMaintenance(!maintenanceMode)}
+                  disabled={savingMaintenance}
+                  className={`relative h-7 w-12 shrink-0 rounded-full transition disabled:opacity-50 ${
+                    maintenanceMode ? "bg-red-500" : "bg-ink-200"
+                  }`}
+                  aria-label="Toggle maintenance mode"
+                >
+                  <span
+                    className={`absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition ${
+                      maintenanceMode ? "left-[22px]" : "left-0.5"
+                    }`}
+                  />
+                </button>
+              </div>
+              <p className="text-sm text-ink-500 mb-4">
+                {maintenanceMode
+                  ? "Investors are currently blocked from the app — they see the message below. Admins are unaffected."
+                  : "When enabled, investors see a maintenance screen instead of the app. Admins can still log in and manage the platform."}
+              </p>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <input
+                  type="text"
+                  value={maintenanceMessage}
+                  onChange={(e) => setMaintenanceMessage(e.target.value)}
+                  placeholder="We're making a few improvements. Please check back shortly."
+                  maxLength={500}
+                  className="flex-1 rounded-lg border border-border bg-background px-3 py-2.5 text-sm"
+                />
+                <button
+                  onClick={handleSaveMaintenanceMessage}
+                  disabled={savingMaintenance}
+                  className="rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-50"
+                >
+                  {savingMaintenance ? "Saving…" : "Save message"}
                 </button>
               </div>
             </div>

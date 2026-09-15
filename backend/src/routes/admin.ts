@@ -35,6 +35,8 @@ import {
   smsSettings,
   smsBroadcasts,
   platformSettings,
+  paymentLinkAccounts,
+  chatClosures,
 } from "../db/schema.js";
 import {
   requireAuth,
@@ -58,6 +60,8 @@ import {
 import { getSmsRules } from "../lib/smsSettings.js";
 import { notify } from "../lib/notify.js";
 import { notifyUserOfChatMessage } from "../lib/chatNotify.js";
+import { getChatClosureStatus, DEFAULT_CHAT_CLOSED_MESSAGE } from "../lib/chatClosure.js";
+import { DEFAULT_MAINTENANCE_MESSAGE } from "../lib/maintenance.js";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -1991,6 +1995,7 @@ adminRouter.get("/deposit-methods", requirePermission("deposits.manage"), async 
         cryptoEnabled: row?.cryptoEnabled ?? true,
         chatEnabled: row?.chatEnabled ?? true,
         binancePayEnabled: row?.binancePayEnabled ?? true,
+        paymentLinkEnabled: row?.paymentLinkEnabled ?? true,
       },
     });
   } catch (error) {
@@ -2004,6 +2009,7 @@ const depositMethodsSchema = z.object({
   cryptoEnabled: z.boolean(),
   chatEnabled: z.boolean(),
   binancePayEnabled: z.boolean(),
+  paymentLinkEnabled: z.boolean(),
 });
 
 adminRouter.put(
@@ -2827,7 +2833,7 @@ adminRouter.get(
       }
 
       const userIds = convos.map((c) => c.userId);
-      const [convoUsers, recentMessages, locks] = await Promise.all([
+      const [convoUsers, recentMessages, locks, closures, [platform]] = await Promise.all([
         db
           .select({
             id: users.id,
@@ -2846,10 +2852,17 @@ adminRouter.get(
           .select()
           .from(chatThreadLocks)
           .where(inArray(chatThreadLocks.threadUserId, userIds)),
+        db
+          .select({ threadUserId: chatClosures.threadUserId })
+          .from(chatClosures)
+          .where(inArray(chatClosures.threadUserId, userIds)),
+        db.select().from(platformSettings).limit(1),
       ]);
 
       const userMap = new Map(convoUsers.map((u) => [u.id, u]));
       const lockMap = new Map(locks.map((l) => [l.threadUserId, l]));
+      const closedSet = new Set(closures.map((c) => c.threadUserId));
+      const globallyClosed = platform?.chatGloballyClosed ?? false;
       // First message per user in the desc-ordered list = latest message
       const latestByUser = new Map<string, (typeof recentMessages)[number]>();
       for (const msg of recentMessages) {
@@ -2871,6 +2884,7 @@ adminRouter.get(
           lastMessagePreview: preview,
           unreadCount: Number(c.unreadCount),
           lockedByAdminName: lock?.adminName ?? null,
+          isClosed: globallyClosed || closedSet.has(c.userId),
         };
       });
 
@@ -2916,7 +2930,7 @@ adminRouter.get(
       const { userId } = req.params;
       const senderAlias = alias(users, "chat_sender");
 
-      const [messages, deposits, [user], [lock]] = await Promise.all([
+      const [messages, deposits, [user], [lock], [closure]] = await Promise.all([
         db
           .select({
             id: chatMessages.id,
@@ -2953,13 +2967,29 @@ adminRouter.get(
           .from(chatThreadLocks)
           .where(eq(chatThreadLocks.threadUserId, userId))
           .limit(1),
+        db
+          .select()
+          .from(chatClosures)
+          .where(eq(chatClosures.threadUserId, userId))
+          .limit(1),
       ]);
 
       if (!user) {
         return res.status(404).json({ error: "User not found" });
       }
 
-      res.json({ messages, deposits, user, lock: lock ?? null });
+      const overallClosure = await getChatClosureStatus(userId);
+
+      res.json({
+        messages,
+        deposits,
+        user,
+        lock: lock ?? null,
+        closed: overallClosure.closed,
+        closedMessage: overallClosure.closedMessage,
+        individuallyClosed: Boolean(closure),
+        individualClosureMessage: closure?.message ?? null,
+      });
     } catch (error) {
       console.error("Error fetching chat messages:", error);
       res.status(500).json({ error: "Failed to fetch messages" });
@@ -3649,11 +3679,20 @@ adminRouter.delete(
 
 // ============ PLATFORM SETTINGS ============
 
-// Site-wide launch date, shown as a "days in operation" banner to investors.
+function serializePlatformSettings(row: typeof platformSettings.$inferSelect | undefined) {
+  return {
+    launchDate: (row?.launchDate ?? new Date()).toISOString(),
+    maintenanceMode: row?.maintenanceMode ?? false,
+    maintenanceMessage: row?.maintenanceMessage || DEFAULT_MAINTENANCE_MESSAGE,
+  };
+}
+
+// Site-wide launch date ("days in operation" banner) and maintenance mode
+// (investors only — admins are never blocked by this, see blockDuringMaintenance).
 adminRouter.get("/platform-settings", async (_req: AuthedRequest, res) => {
   try {
     const [row] = await db.select().from(platformSettings).limit(1);
-    res.json({ data: { launchDate: (row?.launchDate ?? new Date()).toISOString() } });
+    res.json({ data: serializePlatformSettings(row) });
   } catch (error) {
     console.error("Error fetching platform settings:", error);
     res.status(500).json({ error: "Failed to fetch platform settings" });
@@ -3662,6 +3701,8 @@ adminRouter.get("/platform-settings", async (_req: AuthedRequest, res) => {
 
 const platformSettingsSchema = z.object({
   launchDate: z.coerce.date(),
+  maintenanceMode: z.boolean().optional(),
+  maintenanceMessage: z.string().trim().max(500).optional(),
 });
 
 adminRouter.put("/platform-settings", async (req: AuthedRequest, res) => {
@@ -3671,16 +3712,22 @@ adminRouter.put("/platform-settings", async (req: AuthedRequest, res) => {
       return res.status(400).json({ error: parsed.error.flatten() });
     }
 
+    const [existing] = await db.select().from(platformSettings).limit(1);
+
+    // maintenanceMode/maintenanceMessage are optional so the existing
+    // launch-date-only save doesn't have to know about them and can't
+    // accidentally reset them — anything omitted keeps its current value.
     const values = {
       launchDate: parsed.data.launchDate,
+      maintenanceMode: parsed.data.maintenanceMode ?? existing?.maintenanceMode ?? false,
+      maintenanceMessage:
+        parsed.data.maintenanceMessage !== undefined
+          ? parsed.data.maintenanceMessage.trim() || null
+          : (existing?.maintenanceMessage ?? null),
       updatedBy: req.user!.userId,
       updatedAt: new Date(),
     };
 
-    const [existing] = await db
-      .select({ id: platformSettings.id })
-      .from(platformSettings)
-      .limit(1);
     let row;
     if (existing) {
       [row] = await db
@@ -3697,15 +3744,303 @@ adminRouter.put("/platform-settings", async (req: AuthedRequest, res) => {
       "UPDATE_PLATFORM_SETTINGS",
       "platform_settings",
       row.id,
-      { launchDate: values.launchDate },
+      { launchDate: values.launchDate, maintenanceMode: values.maintenanceMode },
     );
 
-    res.json({ data: { launchDate: row.launchDate.toISOString() } });
+    res.json({ data: serializePlatformSettings(row) });
   } catch (error) {
     console.error("Error updating platform settings:", error);
     res.status(500).json({ error: "Failed to update platform settings" });
   }
 });
+
+// Site-wide: closes every investor's chat at once (they can still read, not
+// send — see getChatClosureStatus, which is the sole server-side gate on
+// POST /api/chat/messages and /upload, so this can't be bypassed client-side).
+adminRouter.get(
+  "/chat-settings",
+  requirePermission("chats.manage"),
+  async (_req: AuthedRequest, res) => {
+    try {
+      const [row] = await db.select().from(platformSettings).limit(1);
+      res.json({
+        data: {
+          chatGloballyClosed: row?.chatGloballyClosed ?? false,
+          chatGloballyClosedMessage:
+            row?.chatGloballyClosedMessage ?? DEFAULT_CHAT_CLOSED_MESSAGE,
+        },
+      });
+    } catch (error) {
+      console.error("Error fetching chat settings:", error);
+      res.status(500).json({ error: "Failed to fetch chat settings" });
+    }
+  },
+);
+
+const chatSettingsSchema = z.object({
+  chatGloballyClosed: z.boolean(),
+  chatGloballyClosedMessage: z.string().trim().max(500).optional(),
+});
+
+adminRouter.put(
+  "/chat-settings",
+  requirePermission("chats.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const parsed = chatSettingsSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.flatten() });
+      }
+
+      const values = {
+        chatGloballyClosed: parsed.data.chatGloballyClosed,
+        chatGloballyClosedMessage: parsed.data.chatGloballyClosedMessage?.trim() || null,
+        updatedBy: req.user!.userId,
+        updatedAt: new Date(),
+      };
+
+      const [existing] = await db
+        .select({ id: platformSettings.id })
+        .from(platformSettings)
+        .limit(1);
+      let row;
+      if (existing) {
+        [row] = await db
+          .update(platformSettings)
+          .set(values)
+          .where(eq(platformSettings.id, existing.id))
+          .returning();
+      } else {
+        [row] = await db.insert(platformSettings).values(values).returning();
+      }
+
+      await logAdminAction(
+        req.user!.userId,
+        "UPDATE_CHAT_GLOBAL_CLOSED",
+        "platform_settings",
+        row.id,
+        { chatGloballyClosed: values.chatGloballyClosed },
+      );
+
+      res.json({
+        data: {
+          chatGloballyClosed: row.chatGloballyClosed,
+          chatGloballyClosedMessage: row.chatGloballyClosedMessage ?? DEFAULT_CHAT_CLOSED_MESSAGE,
+        },
+      });
+    } catch (error) {
+      console.error("Error updating chat settings:", error);
+      res.status(500).json({ error: "Failed to update chat settings" });
+    }
+  },
+);
+
+const closeChatSchema = z.object({
+  message: z.string().trim().max(500).optional(),
+});
+
+// Closes one investor's chat — they can still read the thread, not send.
+adminRouter.post(
+  "/chats/:userId/close",
+  requirePermission("chats.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const { userId } = req.params;
+      const parsed = closeChatSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.flatten() });
+      }
+
+      const [user] = await db.select({ id: users.id }).from(users).where(eq(users.id, userId));
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      await db
+        .insert(chatClosures)
+        .values({
+          threadUserId: userId,
+          message: parsed.data.message?.trim() || null,
+          closedBy: req.user!.userId,
+        })
+        .onConflictDoUpdate({
+          target: chatClosures.threadUserId,
+          set: {
+            message: parsed.data.message?.trim() || null,
+            closedBy: req.user!.userId,
+            closedAt: new Date(),
+          },
+        });
+
+      await logAdminAction(req.user!.userId, "CLOSE_CHAT", "chat_closures", userId, {
+        message: parsed.data.message,
+      });
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error closing chat:", error);
+      res.status(500).json({ error: "Failed to close chat" });
+    }
+  },
+);
+
+adminRouter.delete(
+  "/chats/:userId/close",
+  requirePermission("chats.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const { userId } = req.params;
+      await db.delete(chatClosures).where(eq(chatClosures.threadUserId, userId));
+      await logAdminAction(req.user!.userId, "REOPEN_CHAT", "chat_closures", userId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error reopening chat:", error);
+      res.status(500).json({ error: "Failed to reopen chat" });
+    }
+  },
+);
+
+// ============ PAYMENT LINK ACCOUNTS (static, no-API gateways) ============
+
+adminRouter.get("/payment-link-accounts", requirePermission("deposits.manage"), async (_req: AuthedRequest, res) => {
+  try {
+    const accounts = await db
+      .select({
+        id: paymentLinkAccounts.id,
+        label: paymentLinkAccounts.label,
+        url: paymentLinkAccounts.url,
+        instructions: paymentLinkAccounts.instructions,
+        isActive: paymentLinkAccounts.isActive,
+        updatedAt: paymentLinkAccounts.updatedAt,
+        updatedByPhone: users.phone,
+      })
+      .from(paymentLinkAccounts)
+      .leftJoin(users, eq(users.id, paymentLinkAccounts.updatedBy))
+      .orderBy(desc(paymentLinkAccounts.createdAt));
+
+    res.json({ data: accounts });
+  } catch (error) {
+    console.error("Error fetching payment link accounts:", error);
+    res.status(500).json({ error: "Failed to fetch payment link accounts" });
+  }
+});
+
+const paymentLinkAccountSchema = z.object({
+  label: z.string().trim().min(2).max(100),
+  url: z.string().trim().url().max(2000),
+  instructions: z.string().trim().max(2000).nullable().optional(),
+  isActive: z.boolean().optional(),
+});
+
+adminRouter.post(
+  "/payment-link-accounts",
+  requirePermission("deposits.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const parsed = paymentLinkAccountSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.flatten() });
+      }
+
+      const [created] = await db
+        .insert(paymentLinkAccounts)
+        .values({
+          ...parsed.data,
+          isActive: parsed.data.isActive ?? true,
+          updatedBy: req.user!.userId,
+        })
+        .returning();
+
+      await logAdminAction(
+        req.user!.userId,
+        "PAYMENT_LINK_ACCOUNT_CREATED",
+        "payment_link_accounts",
+        created.id,
+        parsed.data,
+      );
+
+      res.json({ data: created });
+    } catch (error) {
+      console.error("Error creating payment link account:", error);
+      res.status(500).json({ error: "Failed to create payment link account" });
+    }
+  },
+);
+
+const paymentLinkAccountUpdateSchema = paymentLinkAccountSchema.partial();
+
+adminRouter.patch(
+  "/payment-link-accounts/:id",
+  requirePermission("deposits.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const parsed = paymentLinkAccountUpdateSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.flatten() });
+      }
+      if (Object.keys(parsed.data).length === 0) {
+        return res.status(400).json({ error: "No fields to update" });
+      }
+
+      const [updated] = await db
+        .update(paymentLinkAccounts)
+        .set({
+          ...parsed.data,
+          updatedBy: req.user!.userId,
+          updatedAt: new Date(),
+        })
+        .where(eq(paymentLinkAccounts.id, req.params.id))
+        .returning();
+
+      if (!updated) {
+        return res.status(404).json({ error: "Payment link account not found" });
+      }
+
+      await logAdminAction(
+        req.user!.userId,
+        "PAYMENT_LINK_ACCOUNT_UPDATED",
+        "payment_link_accounts",
+        updated.id,
+        parsed.data,
+      );
+
+      res.json({ data: updated });
+    } catch (error) {
+      console.error("Error updating payment link account:", error);
+      res.status(500).json({ error: "Failed to update payment link account" });
+    }
+  },
+);
+
+adminRouter.delete(
+  "/payment-link-accounts/:id",
+  requirePermission("deposits.manage"),
+  async (req: AuthedRequest, res) => {
+    try {
+      const [deleted] = await db
+        .delete(paymentLinkAccounts)
+        .where(eq(paymentLinkAccounts.id, req.params.id))
+        .returning();
+
+      if (!deleted) {
+        return res.status(404).json({ error: "Payment link account not found" });
+      }
+
+      await logAdminAction(
+        req.user!.userId,
+        "PAYMENT_LINK_ACCOUNT_DELETED",
+        "payment_link_accounts",
+        req.params.id,
+        {},
+      );
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting payment link account:", error);
+      res.status(500).json({ error: "Failed to delete payment link account" });
+    }
+  },
+);
 
 // ============ SMS ============
 
