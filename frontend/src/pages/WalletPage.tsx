@@ -98,7 +98,7 @@ const DEPOSIT_METHOD_META: {
   { value: "momo", label: "Mobile Money", icon: Smartphone },
   { value: "crypto", label: "USDT (Crypto)", icon: Coins },
   { value: "binancePay", label: "Binance Pay", icon: CreditCard },
-  { value: "paymentLink", label: "Payment Link", icon: ExternalLink },
+  { value: "paymentLink", label: "MOMO", icon: ExternalLink },
 ];
 
 const METHOD_TYPES: {
@@ -562,7 +562,7 @@ export function WalletPage() {
           api.get("/api/wallet/manual-deposits/reference"),
         ]);
         if (!accountsRes.data.accounts?.length) {
-          toast.error("No payment links are available right now. Please try another method.");
+          toast.error("MOMO deposits are not available right now. Please try another method.");
           return;
         }
         setPaymentLinkForm({
@@ -1613,7 +1613,7 @@ export function WalletPage() {
               (a) => a.id === paymentLinkForm.accountId,
             );
             return (
-              <SheetContent title={chosenLink ? `Complete your ${chosenLink.label} deposit` : "Complete your payment link deposit"}>
+              <SheetContent title={chosenLink ? `Complete your ${chosenLink.label} deposit` : "Complete your MOMO deposit"}>
                 <form onSubmit={handlePaymentLinkSubmit} className="space-y-4">
                   <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                     Pay{" "}
@@ -1626,7 +1626,7 @@ export function WalletPage() {
 
                   {paymentLinkSheet.accounts.length > 1 && (
                     <div>
-                      <Label>Payment link</Label>
+                      <Label>MOMO option</Label>
                       <Select
                         value={paymentLinkForm.accountId}
                         onValueChange={(v) =>
