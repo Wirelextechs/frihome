@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
 import { Pagination } from "../components/ui/pagination";
@@ -106,6 +106,7 @@ const emptyPaymentLinkForm = { label: "", url: "", instructions: "" };
 
 export function AdminDepositsPage() {
   const navigate = useNavigate();
+  const [showConfig, setShowConfig] = useState(false);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [form, setForm] = useState({ network: "mtn", accountName: "", accountNumber: "" });
   const [saving, setSaving] = useState(false);
@@ -132,6 +133,15 @@ export function AdminDepositsPage() {
   const [paymentLinks, setPaymentLinks] = useState<PaymentLinkAccount[]>([]);
   const [paymentLinkForm, setPaymentLinkForm] = useState(emptyPaymentLinkForm);
   const [savingPaymentLink, setSavingPaymentLink] = useState(false);
+
+  useEffect(() => {
+    if (!showConfig) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShowConfig(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [showConfig]);
 
   const fetchAll = async (p = page) => {
     try {
@@ -307,265 +317,14 @@ export function AdminDepositsPage() {
           Back to Dashboard
         </button>
 
-        <h1 className="text-3xl font-bold mb-6">Mobile Money Deposits</h1>
-
-        <div className="rounded-lg border border-border bg-card p-6 mb-6">
-          <h2 className="text-sm font-bold text-ink-700 uppercase mb-4">
-            Visible Payment Methods
-          </h2>
-          <p className="text-sm text-ink-500 mb-4">
-            Choose which top-up methods users can pick on the wallet Deposit tab.
-            Changes apply immediately.
-          </p>
-          <div className="space-y-3">
-            {METHOD_OPTIONS.map(({ key, label, hint }) => (
-              <label
-                key={key}
-                className="flex cursor-pointer items-center justify-between gap-4 rounded-lg border border-border px-4 py-3 transition hover:border-primary/30"
-              >
-                <div>
-                  <p className="text-sm font-semibold text-ink-900">{label}</p>
-                  <p className="text-xs text-ink-500">{hint}</p>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={methods[key]}
-                  disabled={savingMethods}
-                  onChange={(e) =>
-                    handleSaveMethods({ ...methods, [key]: e.target.checked })
-                  }
-                  className="h-5 w-5 accent-primary"
-                />
-              </label>
-            ))}
-          </div>
-
-          <div className="mt-5 border-t border-border pt-5">
-            <label className="text-sm font-semibold text-ink-900">
-              Preselected method
-            </label>
-            <p className="mb-2 text-xs text-ink-500">
-              Which method is picked by default when a user opens the Deposit
-              tab. Leave on "Automatic" to use the app's built-in order.
-            </p>
-            <select
-              value={methods.defaultMethod ?? ""}
-              disabled={savingMethods}
-              onChange={(e) =>
-                handleSaveMethods({
-                  ...methods,
-                  defaultMethod: (e.target.value || null) as DepositMethods["defaultMethod"],
-                })
-              }
-              className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm"
-            >
-              <option value="">Automatic</option>
-              {DEFAULT_METHOD_OPTIONS.filter((o) => methods[o.enabledKey]).map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        <div className="rounded-lg border border-border bg-card p-6 mb-6">
-          <h2 className="text-sm font-bold text-ink-700 uppercase mb-4">
-            Receiving Account
-          </h2>
-          <p className="text-sm text-ink-500 mb-4">
-            Clients are shown these details and asked to pay here, quoting
-            the reference we generate for their deposit.
-          </p>
-          <div className="grid gap-4 sm:grid-cols-3">
-            <div>
-              <label className="text-sm font-medium text-ink-700">Network</label>
-              <select
-                value={form.network}
-                onChange={(e) => setForm((f) => ({ ...f, network: e.target.value }))}
-                className="mt-1 w-full rounded-lg border border-border px-3 py-2"
-              >
-                {NETWORKS.map((n) => (
-                  <option key={n} value={n}>
-                    {n.toUpperCase()}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-ink-700">Account name</label>
-              <input
-                value={form.accountName}
-                onChange={(e) => setForm((f) => ({ ...f, accountName: e.target.value }))}
-                className="mt-1 w-full rounded-lg border border-border px-3 py-2"
-                placeholder="AfriHome Ltd"
-              />
-            </div>
-            <div>
-              <label className="text-sm font-medium text-ink-700">Number</label>
-              <input
-                value={form.accountNumber}
-                onChange={(e) => setForm((f) => ({ ...f, accountNumber: e.target.value }))}
-                className="mt-1 w-full rounded-lg border border-border px-3 py-2"
-                placeholder="0240000000"
-              />
-            </div>
-          </div>
+        <div className="mb-6 flex items-center justify-between gap-3">
+          <h1 className="text-3xl font-bold">Mobile Money Deposits</h1>
           <button
-            onClick={handleSaveSettings}
-            disabled={saving}
-            className="mt-4 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+            onClick={() => setShowConfig(true)}
+            className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-semibold text-ink-700 transition hover:border-primary/50"
           >
-            {saving ? "Saving..." : "Save"}
-          </button>
-          {settings?.updatedByEmail && (
-            <p className="mt-2 text-xs text-ink-400">
-              Last set by {settings.updatedByEmail} ·{" "}
-              {new Date(settings.updatedAt).toLocaleString()}
-            </p>
-          )}
-        </div>
-
-        <div className="rounded-lg border border-border bg-card p-6 mb-6">
-          <h2 className="text-sm font-bold text-ink-700 uppercase mb-4">
-            My Binance Pay ID
-          </h2>
-          <p className="text-sm text-ink-500 mb-4">
-            Investors who choose Binance Pay see a list of every admin's active
-            ID and pick one to pay into. You can register at most one.
-          </p>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label className="text-sm font-medium text-ink-700">
-                Display label (shown to investors)
-              </label>
-              <input
-                value={binanceForm.label}
-                onChange={(e) => setBinanceForm((f) => ({ ...f, label: e.target.value }))}
-                className="mt-1 w-full rounded-lg border border-border px-3 py-2"
-                placeholder="e.g. Support Team A"
-              />
-            </div>
-            <div>
-              <label className="text-sm font-medium text-ink-700">Your Binance Pay ID</label>
-              <input
-                value={binanceForm.binanceId}
-                onChange={(e) =>
-                  setBinanceForm((f) => ({ ...f, binanceId: e.target.value }))
-                }
-                className="mt-1 w-full rounded-lg border border-border px-3 py-2"
-                placeholder="123456789"
-              />
-            </div>
-          </div>
-          <div className="mt-4 flex gap-2">
-            <button
-              onClick={handleSaveBinanceAccount}
-              disabled={savingBinance}
-              className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50"
-            >
-              {savingBinance ? "Saving..." : binanceAccount ? "Update" : "Save"}
-            </button>
-            {binanceAccount && (
-              <button
-                onClick={handleRemoveBinanceAccount}
-                disabled={removingBinance}
-                className="rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
-              >
-                {removingBinance ? "Removing..." : "Remove"}
-              </button>
-            )}
-          </div>
-        </div>
-
-        <div className="rounded-lg border border-border bg-card p-6 mb-6">
-          <h2 className="text-sm font-bold text-ink-700 uppercase mb-4">
-            Payment Links
-          </h2>
-          <p className="text-sm text-ink-500 mb-4">
-            Static checkout links investors pay into directly, then submit proof for
-            review — for gateways with no API to confirm payment automatically.
-          </p>
-
-          {paymentLinks.length > 0 && (
-            <div className="mb-4 space-y-2">
-              {paymentLinks.map((link) => (
-                <div
-                  key={link.id}
-                  className="flex items-center justify-between gap-3 rounded-lg border border-border px-4 py-3"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-ink-900">{link.label}</p>
-                    <p className="truncate text-xs text-ink-400">{link.url}</p>
-                  </div>
-                  <label className="flex shrink-0 cursor-pointer items-center gap-2">
-                    <span className="text-xs text-ink-500">
-                      {link.isActive ? "Active" : "Inactive"}
-                    </span>
-                    <input
-                      type="checkbox"
-                      checked={link.isActive}
-                      onChange={() => handleTogglePaymentLink(link)}
-                      className="h-4 w-4 accent-primary"
-                    />
-                  </label>
-                  <button
-                    onClick={() => handleDeletePaymentLink(link)}
-                    className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-ink-400 hover:bg-red-50 hover:text-red-600"
-                    aria-label="Remove payment link"
-                  >
-                    <Trash2 size={15} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <label className="text-sm font-medium text-ink-700">Label</label>
-              <input
-                value={paymentLinkForm.label}
-                onChange={(e) =>
-                  setPaymentLinkForm((f) => ({ ...f, label: e.target.value }))
-                }
-                className="mt-1 w-full rounded-lg border border-border px-3 py-2"
-                placeholder="e.g. Card checkout"
-              />
-            </div>
-            <div>
-              <label className="text-sm font-medium text-ink-700">URL</label>
-              <input
-                value={paymentLinkForm.url}
-                onChange={(e) =>
-                  setPaymentLinkForm((f) => ({ ...f, url: e.target.value }))
-                }
-                className="mt-1 w-full rounded-lg border border-border px-3 py-2"
-                placeholder="https://..."
-              />
-            </div>
-            <div className="sm:col-span-2">
-              <label className="text-sm font-medium text-ink-700">
-                Instructions (optional)
-              </label>
-              <textarea
-                value={paymentLinkForm.instructions}
-                onChange={(e) =>
-                  setPaymentLinkForm((f) => ({ ...f, instructions: e.target.value }))
-                }
-                rows={2}
-                className="mt-1 w-full rounded-lg border border-border px-3 py-2 text-sm"
-                placeholder="Extra guidance shown to the investor for this link"
-              />
-            </div>
-          </div>
-          <button
-            onClick={handleAddPaymentLink}
-            disabled={savingPaymentLink}
-            className="mt-4 flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50"
-          >
-            <Plus size={15} />
-            {savingPaymentLink ? "Adding..." : "Add payment link"}
+            <SlidersHorizontal size={16} />
+            Configure
           </button>
         </div>
 
@@ -641,6 +400,286 @@ export function AdminDepositsPage() {
           )}
         </div>
       </div>
+
+      {showConfig && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setShowConfig(false)} />
+          <div className="relative flex max-h-[92dvh] w-full max-w-4xl flex-col overflow-hidden rounded-t-2xl bg-background shadow-soft-lg animate-in slide-in-from-bottom-4 duration-200 sm:m-4 sm:rounded-2xl">
+            <div className="flex items-center justify-between border-b border-border bg-card px-4 py-3.5 sm:px-6">
+              <p className="text-base font-bold text-ink-900">Deposit Settings</p>
+              <button
+                onClick={() => setShowConfig(false)}
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-ink-500 transition hover:bg-ink-100 hover:text-ink-900"
+                aria-label="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+              <div className="rounded-lg border border-border bg-card p-6 mb-6">
+                <h2 className="text-sm font-bold text-ink-700 uppercase mb-4">
+                  Visible Payment Methods
+                </h2>
+                <p className="text-sm text-ink-500 mb-4">
+                  Choose which top-up methods users can pick on the wallet Deposit tab.
+                  Changes apply immediately.
+                </p>
+                <div className="space-y-3">
+                  {METHOD_OPTIONS.map(({ key, label, hint }) => (
+                    <label
+                      key={key}
+                      className="flex cursor-pointer items-center justify-between gap-4 rounded-lg border border-border px-4 py-3 transition hover:border-primary/30"
+                    >
+                      <div>
+                        <p className="text-sm font-semibold text-ink-900">{label}</p>
+                        <p className="text-xs text-ink-500">{hint}</p>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={methods[key]}
+                        disabled={savingMethods}
+                        onChange={(e) =>
+                          handleSaveMethods({ ...methods, [key]: e.target.checked })
+                        }
+                        className="h-5 w-5 accent-primary"
+                      />
+                    </label>
+                  ))}
+                </div>
+
+                <div className="mt-5 border-t border-border pt-5">
+                  <label className="text-sm font-semibold text-ink-900">
+                    Preselected method
+                  </label>
+                  <p className="mb-2 text-xs text-ink-500">
+                    Which method is picked by default when a user opens the Deposit
+                    tab. Leave on "Automatic" to use the app's built-in order.
+                  </p>
+                  <select
+                    value={methods.defaultMethod ?? ""}
+                    disabled={savingMethods}
+                    onChange={(e) =>
+                      handleSaveMethods({
+                        ...methods,
+                        defaultMethod: (e.target.value || null) as DepositMethods["defaultMethod"],
+                      })
+                    }
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm"
+                  >
+                    <option value="">Automatic</option>
+                    {DEFAULT_METHOD_OPTIONS.filter((o) => methods[o.enabledKey]).map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-border bg-card p-6 mb-6">
+                <h2 className="text-sm font-bold text-ink-700 uppercase mb-4">
+                  Receiving Account
+                </h2>
+                <p className="text-sm text-ink-500 mb-4">
+                  Clients are shown these details and asked to pay here, quoting
+                  the reference we generate for their deposit.
+                </p>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div>
+                    <label className="text-sm font-medium text-ink-700">Network</label>
+                    <select
+                      value={form.network}
+                      onChange={(e) => setForm((f) => ({ ...f, network: e.target.value }))}
+                      className="mt-1 w-full rounded-lg border border-border px-3 py-2"
+                    >
+                      {NETWORKS.map((n) => (
+                        <option key={n} value={n}>
+                          {n.toUpperCase()}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-ink-700">Account name</label>
+                    <input
+                      value={form.accountName}
+                      onChange={(e) => setForm((f) => ({ ...f, accountName: e.target.value }))}
+                      className="mt-1 w-full rounded-lg border border-border px-3 py-2"
+                      placeholder="AfriHome Ltd"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-ink-700">Number</label>
+                    <input
+                      value={form.accountNumber}
+                      onChange={(e) => setForm((f) => ({ ...f, accountNumber: e.target.value }))}
+                      className="mt-1 w-full rounded-lg border border-border px-3 py-2"
+                      placeholder="0240000000"
+                    />
+                  </div>
+                </div>
+                <button
+                  onClick={handleSaveSettings}
+                  disabled={saving}
+                  className="mt-4 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+                >
+                  {saving ? "Saving..." : "Save"}
+                </button>
+                {settings?.updatedByEmail && (
+                  <p className="mt-2 text-xs text-ink-400">
+                    Last set by {settings.updatedByEmail} ·{" "}
+                    {new Date(settings.updatedAt).toLocaleString()}
+                  </p>
+                )}
+              </div>
+
+              <div className="rounded-lg border border-border bg-card p-6 mb-6">
+                <h2 className="text-sm font-bold text-ink-700 uppercase mb-4">
+                  Payment Links
+                </h2>
+                <p className="text-sm text-ink-500 mb-4">
+                  Static checkout links investors pay into directly, then submit proof for
+                  review — for gateways with no API to confirm payment automatically.
+                </p>
+
+                {paymentLinks.length > 0 && (
+                  <div className="mb-4 space-y-2">
+                    {paymentLinks.map((link) => (
+                      <div
+                        key={link.id}
+                        className="flex items-center justify-between gap-3 rounded-lg border border-border px-4 py-3"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold text-ink-900">{link.label}</p>
+                          <p className="truncate text-xs text-ink-400">{link.url}</p>
+                        </div>
+                        <label className="flex shrink-0 cursor-pointer items-center gap-2">
+                          <span className="text-xs text-ink-500">
+                            {link.isActive ? "Active" : "Inactive"}
+                          </span>
+                          <input
+                            type="checkbox"
+                            checked={link.isActive}
+                            onChange={() => handleTogglePaymentLink(link)}
+                            className="h-4 w-4 accent-primary"
+                          />
+                        </label>
+                        <button
+                          onClick={() => handleDeletePaymentLink(link)}
+                          className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-ink-400 hover:bg-red-50 hover:text-red-600"
+                          aria-label="Remove payment link"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="text-sm font-medium text-ink-700">Label</label>
+                    <input
+                      value={paymentLinkForm.label}
+                      onChange={(e) =>
+                        setPaymentLinkForm((f) => ({ ...f, label: e.target.value }))
+                      }
+                      className="mt-1 w-full rounded-lg border border-border px-3 py-2"
+                      placeholder="e.g. Card checkout"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-ink-700">URL</label>
+                    <input
+                      value={paymentLinkForm.url}
+                      onChange={(e) =>
+                        setPaymentLinkForm((f) => ({ ...f, url: e.target.value }))
+                      }
+                      className="mt-1 w-full rounded-lg border border-border px-3 py-2"
+                      placeholder="https://..."
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="text-sm font-medium text-ink-700">
+                      Instructions (optional)
+                    </label>
+                    <textarea
+                      value={paymentLinkForm.instructions}
+                      onChange={(e) =>
+                        setPaymentLinkForm((f) => ({ ...f, instructions: e.target.value }))
+                      }
+                      rows={2}
+                      className="mt-1 w-full rounded-lg border border-border px-3 py-2 text-sm"
+                      placeholder="Extra guidance shown to the investor for this link"
+                    />
+                  </div>
+                </div>
+                <button
+                  onClick={handleAddPaymentLink}
+                  disabled={savingPaymentLink}
+                  className="mt-4 flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+                >
+                  <Plus size={15} />
+                  {savingPaymentLink ? "Adding..." : "Add payment link"}
+                </button>
+              </div>
+
+              <div className="rounded-lg border border-border bg-card p-6 mb-6">
+                <h2 className="text-sm font-bold text-ink-700 uppercase mb-4">
+                  My Binance Pay ID
+                </h2>
+                <p className="text-sm text-ink-500 mb-4">
+                  Investors who choose Binance Pay see a list of every admin's active
+                  ID and pick one to pay into. You can register at most one.
+                </p>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="text-sm font-medium text-ink-700">
+                      Display label (shown to investors)
+                    </label>
+                    <input
+                      value={binanceForm.label}
+                      onChange={(e) => setBinanceForm((f) => ({ ...f, label: e.target.value }))}
+                      className="mt-1 w-full rounded-lg border border-border px-3 py-2"
+                      placeholder="e.g. Support Team A"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-ink-700">Your Binance Pay ID</label>
+                    <input
+                      value={binanceForm.binanceId}
+                      onChange={(e) =>
+                        setBinanceForm((f) => ({ ...f, binanceId: e.target.value }))
+                      }
+                      className="mt-1 w-full rounded-lg border border-border px-3 py-2"
+                      placeholder="123456789"
+                    />
+                  </div>
+                </div>
+                <div className="mt-4 flex gap-2">
+                  <button
+                    onClick={handleSaveBinanceAccount}
+                    disabled={savingBinance}
+                    className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+                  >
+                    {savingBinance ? "Saving..." : binanceAccount ? "Update" : "Save"}
+                  </button>
+                  {binanceAccount && (
+                    <button
+                      onClick={handleRemoveBinanceAccount}
+                      disabled={removingBinance}
+                      className="rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
+                    >
+                      {removingBinance ? "Removing..." : "Remove"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
