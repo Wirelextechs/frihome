@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
+  AlertTriangle,
   ArrowDownToLine,
   ArrowUpFromLine,
   Building2,
@@ -455,6 +456,7 @@ export function WalletPage() {
     accountId: "",
     gatewayReference: "",
     senderName: "",
+    senderNumber: "",
     screenshotUrl: "" as string | null,
   });
   const [paymentLinkSubmitting, setPaymentLinkSubmitting] = useState(false);
@@ -551,6 +553,7 @@ export function WalletPage() {
           accountId: accountsRes.data.accounts[0].id,
           gatewayReference: "",
           senderName: "",
+          senderNumber: "",
           screenshotUrl: null,
         });
         setPaymentLinkSheet({
@@ -656,6 +659,7 @@ export function WalletPage() {
         paymentLinkAccountId: paymentLinkForm.accountId,
         gatewayReference: paymentLinkForm.gatewayReference || undefined,
         senderName: paymentLinkForm.senderName,
+        senderNumber: paymentLinkForm.senderNumber,
         screenshotUrl: paymentLinkForm.screenshotUrl,
       });
       toast.success("Submitted, track it in live chat");
@@ -1589,61 +1593,71 @@ export function WalletPage() {
               (a) => a.id === paymentLinkForm.accountId,
             );
             return (
-              <SheetContent title="Complete your payment link deposit">
+              <SheetContent title={chosenLink ? `Complete your ${chosenLink.label} deposit` : "Complete your payment link deposit"}>
                 <form onSubmit={handlePaymentLinkSubmit} className="space-y-4">
                   <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                    Open the link below and pay{" "}
+                    Pay{" "}
                     <strong>
                       {formatCurrency(convertFromGhs(Number(paymentLinkSheet.amountGhs), currency), currency)}
-                    </strong>
-                    , quoting <strong>{paymentLinkSheet.reference}</strong> if the
-                    gateway allows a reference. Then fill in your details and
+                    </strong>{" "}
+                    below, quoting <strong>{paymentLinkSheet.reference}</strong> if
+                    the gateway allows a reference. Then fill in your details and
                     upload your screenshot. Your wallet is credited after a quick
                     manual review.
                   </div>
 
-                  <div>
-                    <Label>Payment link</Label>
-                    <Select
-                      value={paymentLinkForm.accountId}
-                      onValueChange={(v) =>
-                        setPaymentLinkForm((f) => ({ ...f, accountId: v }))
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {paymentLinkSheet.accounts.map((a) => (
-                          <SelectItem key={a.id} value={a.id}>
-                            {a.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  {paymentLinkSheet.accounts.length > 1 && (
+                    <div>
+                      <Label>Payment link</Label>
+                      <Select
+                        value={paymentLinkForm.accountId}
+                        onValueChange={(v) =>
+                          setPaymentLinkForm((f) => ({ ...f, accountId: v }))
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {paymentLinkSheet.accounts.map((a) => (
+                            <SelectItem key={a.id} value={a.id}>
+                              {a.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
 
                   {chosenLink && (
-                    <Card className="p-4">
-                      {chosenLink.instructions && (
-                        <p className="mb-3 whitespace-pre-wrap text-xs text-ink-500">
-                          {chosenLink.instructions}
-                        </p>
-                      )}
+                    <div className="space-y-2">
+                      <iframe
+                        src={chosenLink.url}
+                        title={chosenLink.label}
+                        className="h-[420px] w-full rounded-xl border border-border"
+                      />
                       <a
                         href={chosenLink.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center justify-center gap-1.5 rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground transition active:scale-95"
+                        className="flex items-center justify-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 transition hover:bg-amber-100"
                       >
-                        <ExternalLink size={15} />
-                        Open payment link
+                        <ExternalLink size={13} />
+                        Page above not loading? Tap here to open it in a new tab
                       </a>
-                    </Card>
+                      {chosenLink.instructions && (
+                        <div className="flex items-start gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                          <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+                          <span className="whitespace-pre-line">{chosenLink.instructions}</span>
+                        </div>
+                      )}
+                    </div>
                   )}
 
                   <div>
-                    <Label htmlFor="paymentLinkSenderName">Your name</Label>
+                    <Label htmlFor="paymentLinkSenderName">
+                      Name or number you paid with
+                    </Label>
                     <Input
                       id="paymentLinkSenderName"
                       required
@@ -1651,13 +1665,29 @@ export function WalletPage() {
                       onChange={(e) =>
                         setPaymentLinkForm((f) => ({ ...f, senderName: e.target.value }))
                       }
-                      placeholder="Name on the payment"
+                      placeholder="Ama Owusu or 0240000000"
+                    />
+                  </div>
+
+                  <div>
+                    <Label htmlFor="paymentLinkSenderNumber">
+                      Momo number used to pay
+                    </Label>
+                    <Input
+                      id="paymentLinkSenderNumber"
+                      required
+                      type="tel"
+                      value={paymentLinkForm.senderNumber}
+                      onChange={(e) =>
+                        setPaymentLinkForm((f) => ({ ...f, senderNumber: e.target.value }))
+                      }
+                      placeholder="0240000000"
                     />
                   </div>
 
                   <div>
                     <Label htmlFor="paymentLinkGatewayRef">
-                      Gateway transaction ID (optional)
+                      Transaction ID from the payment page (optional)
                     </Label>
                     <Input
                       id="paymentLinkGatewayRef"
@@ -1668,7 +1698,7 @@ export function WalletPage() {
                           gatewayReference: e.target.value,
                         }))
                       }
-                      placeholder="If the gateway shows one"
+                      placeholder="If one was shown after payment"
                     />
                   </div>
 

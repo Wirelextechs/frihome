@@ -2076,12 +2076,15 @@ adminRouter.get("/manual-deposits/pending", requirePermission("deposits.manage")
         senderNumber: manualDeposits.senderNumber,
         senderBinanceId: manualDeposits.senderBinanceId,
         senderEmail: manualDeposits.senderEmail,
+        gatewayReference: manualDeposits.gatewayReference,
         createdAt: manualDeposits.createdAt,
         userPhone: users.phone,
         userFullName: users.fullName,
+        paymentLinkAccountLabel: paymentLinkAccounts.label,
       })
       .from(manualDeposits)
       .innerJoin(users, eq(users.id, manualDeposits.userId))
+      .leftJoin(paymentLinkAccounts, eq(paymentLinkAccounts.id, manualDeposits.paymentLinkAccountId))
       .where(eq(manualDeposits.status, "pending"))
       .orderBy(desc(manualDeposits.createdAt))
       .limit(limit)
@@ -2125,8 +2128,19 @@ adminRouter.get("/manual-deposits/:depositId", requirePermission("deposits.manag
         .limit(1);
     }
 
+    let paymentLinkAccount = null;
+    if (deposit.paymentLinkAccountId) {
+      [paymentLinkAccount] = await db
+        .select()
+        .from(paymentLinkAccounts)
+        .where(eq(paymentLinkAccounts.id, deposit.paymentLinkAccountId))
+        .limit(1);
+    }
+
     // The user paid intended + fee (fee is charged on top), so show reviewers
-    // the exact figure to expect on the payment screenshot.
+    // the exact figure to expect on the payment screenshot. Payment-link
+    // deposits reuse the momo fee/threshold settings — no dedicated setting
+    // for this method yet.
     const rules = await getPaymentRules();
     const depositFeePct =
       deposit.method === "binance_pay" ? rules.binanceDepositFeePct : rules.momoDepositFeePct;
@@ -2139,6 +2153,7 @@ adminRouter.get("/manual-deposits/:depositId", requirePermission("deposits.manag
         ...deposit,
         user,
         binanceAccount,
+        paymentLinkAccount,
         depositFeePct,
         expectedPaymentGhs,
       },
@@ -2191,7 +2206,9 @@ adminRouter.post(
       const description =
         deposit.method === "binance_pay"
           ? "Manual Binance Pay deposit"
-          : `Manual mobile money deposit (${deposit.network})`;
+          : deposit.method === "payment_link"
+            ? "Manual payment link deposit"
+            : `Manual mobile money deposit (${deposit.network})`;
 
       await db.insert(walletTransactions).values({
         userId: deposit.userId,

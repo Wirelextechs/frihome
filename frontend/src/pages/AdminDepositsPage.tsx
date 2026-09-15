@@ -15,7 +15,7 @@ interface Settings {
 
 interface PendingDeposit {
   id: string;
-  method: "momo" | "binance_pay";
+  method: "momo" | "binance_pay" | "payment_link";
   reference: string;
   amountGhs: string;
   network: string | null;
@@ -23,6 +23,8 @@ interface PendingDeposit {
   senderNumber: string | null;
   senderBinanceId: string | null;
   senderEmail: string | null;
+  gatewayReference: string | null;
+  paymentLinkAccountLabel: string | null;
   createdAt: string;
   userEmail: string;
   userFullName: string;
@@ -565,7 +567,11 @@ export function AdminDepositsPage() {
                         {d.reference}
                       </td>
                       <td className="px-4 py-3 text-sm text-ink-700">
-                        {d.method === "binance_pay" ? "Binance Pay" : d.network?.toUpperCase()}
+                        {d.method === "binance_pay"
+                          ? "Binance Pay"
+                          : d.method === "payment_link"
+                            ? d.paymentLinkAccountLabel ?? "Payment Link"
+                            : d.network?.toUpperCase()}
                       </td>
                       <td className="px-4 py-3 text-sm text-ink-600">
                         {new Date(d.createdAt).toLocaleDateString()}

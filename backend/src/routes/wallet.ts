@@ -509,6 +509,7 @@ const paymentLinkManualDepositSchema = z.object({
   paymentLinkAccountId: z.string().uuid(),
   gatewayReference: z.string().trim().max(100).optional(),
   senderName: z.string().min(2).max(255),
+  senderNumber: z.string().min(7).max(30),
   screenshotUrl: z.string().url(),
 });
 
@@ -627,6 +628,8 @@ walletRouter.post(
                 gatewayReference:
                   (parsed.data as z.infer<typeof paymentLinkManualDepositSchema>).gatewayReference ??
                   null,
+                senderNumber: (parsed.data as z.infer<typeof paymentLinkManualDepositSchema>)
+                  .senderNumber,
                 screenshotUrl,
               }
             : {

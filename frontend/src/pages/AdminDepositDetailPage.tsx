@@ -7,7 +7,7 @@ import { AdminUserDetailModal } from "../components/AdminUserDetailModal";
 
 interface DepositDetail {
   id: string;
-  method: "momo" | "binance_pay";
+  method: "momo" | "binance_pay" | "payment_link";
   reference: string;
   amountGhs: string;
   network: string | null;
@@ -15,6 +15,7 @@ interface DepositDetail {
   senderNumber: string | null;
   senderBinanceId: string | null;
   senderEmail: string | null;
+  gatewayReference: string | null;
   screenshotUrl: string;
   status: "pending" | "approved" | "rejected";
   rejectionReason: string | null;
@@ -22,6 +23,7 @@ interface DepositDetail {
   depositFeePct: number;
   expectedPaymentGhs: number;
   binanceAccount: { binanceId: string; label: string } | null;
+  paymentLinkAccount: { label: string; url: string } | null;
   user: {
     id: string;
     phone: string;
@@ -130,7 +132,11 @@ export function AdminDepositDetailPage() {
         <div className="mb-6 flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-ink-900">
-              {deposit.method === "binance_pay" ? "Binance Pay Deposit" : "Mobile Money Deposit"}
+              {deposit.method === "binance_pay"
+                ? "Binance Pay Deposit"
+                : deposit.method === "payment_link"
+                  ? "Payment Link Deposit"
+                  : "Mobile Money Deposit"}
             </h1>
             <p className="text-sm text-ink-500 font-mono">{deposit.reference}</p>
           </div>
@@ -216,6 +222,16 @@ export function AdminDepositDetailPage() {
               <Row label="Sender Binance ID" value={deposit.senderBinanceId} />
               <Row label="Sender email" value={deposit.senderEmail} />
               <Row label="Sender nickname" value={deposit.senderName} />
+            </>
+          ) : deposit.method === "payment_link" ? (
+            <>
+              <Row
+                label="Paid via"
+                value={deposit.paymentLinkAccount ? deposit.paymentLinkAccount.label : "—"}
+              />
+              <Row label="Gateway transaction ID" value={deposit.gatewayReference} />
+              <Row label="Name or number paid with" value={deposit.senderName} />
+              <Row label="Momo number used to pay" value={deposit.senderNumber} />
             </>
           ) : (
             <>

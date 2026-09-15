@@ -457,8 +457,12 @@ export const manualDeposits = pgTable("manual_deposits", {
   method: manualDepositMethodEnum("method").notNull().default("momo"),
   reference: varchar("reference", { length: 20 }).notNull().unique(),
   amountGhs: numeric("amount_ghs", { precision: 14, scale: 2 }).notNull(),
-  // Momo-specific; null for binance_pay deposits.
+  // Momo-specific; null for binance_pay/payment_link deposits.
   network: varchar("network", { length: 30 }),
+  // The momo number the investor paid from — required for momo and
+  // payment_link deposits (so the specific payment can be traced back to a
+  // sender number even when the gateway itself doesn't confirm it); null
+  // for binance_pay deposits.
   senderNumber: varchar("sender_number", { length: 30 }),
   // Shared "who sent this" label: momo sender name, or the investor's
   // Binance nickname.
