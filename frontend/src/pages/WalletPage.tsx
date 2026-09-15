@@ -1399,7 +1399,11 @@ export function WalletPage() {
               </div>
 
               <div>
-                <Label>Payment screenshot</Label>
+                <Label>Mobile money SMS screenshot</Label>
+                <p className="mb-1.5 -mt-0.5 text-xs text-ink-400">
+                  Screenshot of the confirmation SMS from your network. Anything
+                  else will be rejected.
+                </p>
                 <ImageUpload
                   value={momoForm.screenshotUrl}
                   onChange={(url) => setMomoForm((f) => ({ ...f, screenshotUrl: url }))}
@@ -1701,7 +1705,11 @@ export function WalletPage() {
                   </div>
 
                   <div>
-                    <Label>Payment screenshot</Label>
+                    <Label>Mobile money SMS screenshot</Label>
+                    <p className="mb-1.5 -mt-0.5 text-xs text-ink-400">
+                      Screenshot of the confirmation SMS from your network. Anything
+                      else will be rejected.
+                    </p>
                     <ImageUpload
                       value={paymentLinkForm.screenshotUrl}
                       onChange={(url) =>
