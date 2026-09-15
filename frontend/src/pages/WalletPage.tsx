@@ -1600,10 +1600,8 @@ export function WalletPage() {
                     <strong>
                       {formatCurrency(convertFromGhs(Number(paymentLinkSheet.amountGhs), currency), currency)}
                     </strong>{" "}
-                    below, quoting <strong>{paymentLinkSheet.reference}</strong> if
-                    the gateway allows a reference. Then fill in your details and
-                    upload your screenshot. Your wallet is credited after a quick
-                    manual review.
+                    below. Then fill in your details and upload your screenshot.
+                    Your wallet is credited after a quick manual review.
                   </div>
 
                   {paymentLinkSheet.accounts.length > 1 && (
